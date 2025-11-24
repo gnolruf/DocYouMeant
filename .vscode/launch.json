@@ -1,0 +1,13 @@
+{
+    "configurations": [
+      {
+        "type": "lldb",
+        "request": "launch",
+        "name": "Debug executable",
+        "program": "${workspaceFolder}/target/debug/docyoumeant",
+        "preLaunchTask": "cargo build",
+        "args": [],
+        "cwd": "${workspaceFolder}"
+      }
+    ]
+}

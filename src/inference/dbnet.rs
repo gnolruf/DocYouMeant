@@ -1,0 +1,394 @@
+use geo::Coord;
+use image::{ImageBuffer, RgbImage};
+use imageproc::contours::{find_contours_with_threshold, Contour};
+use imageproc::distance_transform::Norm;
+use imageproc::geometry::min_area_rect;
+use imageproc::morphology::dilate;
+use imageproc::point::Point;
+use ndarray::Array2;
+use once_cell::sync::OnceCell;
+use ort::{inputs, session::Session, value::Value};
+use std::sync::Mutex;
+
+use crate::document::TextBox;
+use crate::inference::error::InferenceError;
+use crate::utils::{box_utils, image_utils};
+
+static DBNET_INSTANCE: OnceCell<Mutex<DBNet>> = OnceCell::new();
+
+pub struct DBNet {
+    session: Session,
+    mean_values: [f32; 3],
+    norm_values: [f32; 3],
+    max_side_len: i32,
+    box_thresh: f32,
+    box_score_thresh: f32,
+    unclip_ratio: f32,
+    src_dimensions: [i32; 2], // [width, height]
+    dst_dimensions: [i32; 2], // [width, height]
+    padding: [i32; 4],        // [top, bottom, left, right]
+}
+
+impl DBNet {
+    const MODEL_PATH: &'static str = "models/onnx/text_detection.onnx";
+    const NUM_THREADS: usize = 4;
+
+    pub fn new() -> Result<Self, InferenceError> {
+        let session = Session::builder()
+            .map_err(|source| InferenceError::ModelFileLoadError {
+                path: Self::MODEL_PATH.into(),
+                source,
+            })?
+            .with_inter_threads(Self::NUM_THREADS)?
+            .commit_from_file(Self::MODEL_PATH)
+            .map_err(|source| InferenceError::ModelFileLoadError {
+                path: Self::MODEL_PATH.into(),
+                source,
+            })?;
+
+        Ok(Self {
+            session,
+            mean_values: [0.485 * 255.0, 0.456 * 255.0, 0.406 * 255.0],
+            norm_values: [
+                1.0 / 0.229 / 255.0,
+                1.0 / 0.224 / 255.0,
+                1.0 / 0.225 / 255.0,
+            ],
+            max_side_len: 960,
+            box_thresh: 0.3,
+            box_score_thresh: 0.5,
+            unclip_ratio: 1.5,
+            src_dimensions: [0, 0],
+            dst_dimensions: [0, 0],
+            padding: [0, 0, 0, 0],
+        })
+    }
+
+    pub fn get_or_init() -> Result<(), InferenceError> {
+        DBNET_INSTANCE.get_or_try_init(|| Self::new().map(Mutex::new))?;
+        Ok(())
+    }
+
+    fn instance() -> Result<&'static Mutex<DBNet>, InferenceError> {
+        DBNET_INSTANCE.get_or_try_init(|| Self::new().map(Mutex::new))
+    }
+
+    pub fn preprocess(&mut self, image: &RgbImage) -> Result<RgbImage, InferenceError> {
+        let width = image.width() as i32;
+        let height = image.height() as i32;
+        let orig_max_side = width.max(height);
+
+        let resize_ratio = if self.max_side_len <= 0 || self.max_side_len > orig_max_side {
+            1.0
+        } else {
+            self.max_side_len as f32 / orig_max_side as f32
+        };
+
+        let resized_width = (width as f32 * resize_ratio) as u32;
+        let resized_height = (height as f32 * resize_ratio) as u32;
+
+        let resized_img = image::imageops::resize(
+            image,
+            resized_width,
+            resized_height,
+            image::imageops::FilterType::Lanczos3,
+        );
+
+        let pad_width_total = (32 - (resized_width % 32)) % 32;
+        let pad_height_total = (32 - (resized_height % 32)) % 32;
+
+        let pad_left = pad_width_total / 2;
+        let pad_right = pad_width_total - pad_left;
+        let pad_top = pad_height_total / 2;
+        let pad_bottom = pad_height_total - pad_top;
+
+        let final_width = resized_width + pad_width_total;
+        let final_height = resized_height + pad_height_total;
+
+        let padded_final_img =
+            image_utils::add_image_padding(&resized_img, pad_top, pad_bottom, pad_left, pad_right);
+
+        self.src_dimensions = [width, height];
+        self.dst_dimensions = [final_width as i32, final_height as i32];
+        self.padding = [
+            pad_top as i32,
+            pad_bottom as i32,
+            pad_left as i32,
+            pad_right as i32,
+        ];
+
+        Ok(padded_final_img)
+    }
+
+    pub fn detect(&mut self, image: &RgbImage) -> Result<Vec<TextBox>, InferenceError> {
+        let input_array =
+            image_utils::subtract_mean_normalize(image, &self.mean_values, &self.norm_values)
+                .map_err(|e| InferenceError::PreprocessingError {
+                    operation: "normalize image".to_string(),
+                    message: e.to_string(),
+                })?;
+
+        let shape = input_array.shape().to_vec();
+        let (data, _offset) = input_array.into_raw_vec_and_offset();
+        let input_value = Value::from_array((shape.as_slice(), data)).map_err(|e| {
+            InferenceError::PreprocessingError {
+                operation: "create input value".to_string(),
+                message: e.to_string(),
+            }
+        })?;
+
+        let (output_data, output_shape) = {
+            let outputs = self
+                .session
+                .run(inputs!["x" => input_value])
+                .map_err(|source| InferenceError::ModelExecutionError {
+                    operation: "DBNet forward pass".to_string(),
+                    source,
+                })?;
+
+            let output = outputs
+                .get("fetch_name_0")
+                .ok_or_else(|| InferenceError::PredictionError {
+                    operation: "get model outputs".to_string(),
+                    message: "Output 'fetch_name_0' not found".to_string(),
+                })?
+                .try_extract_tensor::<f32>()
+                .map_err(|source| InferenceError::PredictionError {
+                    operation: "extract output tensor".to_string(),
+                    message: source.to_string(),
+                })?;
+
+            (output.1.to_vec(), output.0.clone())
+        };
+
+        let out_height = output_shape[2] as usize;
+        let out_width = output_shape[3] as usize;
+        let area = out_height * out_width;
+
+        let mut pred_data = vec![0.0f32; area];
+        let mut threshold_data = vec![false; area];
+
+        for y in 0..out_height {
+            for x in 0..out_width {
+                let idx = y * out_width + x;
+                let value = output_data[idx];
+                pred_data[idx] = value;
+                threshold_data[idx] = value > self.box_thresh;
+            }
+        }
+
+        let pred_array =
+            Array2::from_shape_vec((out_height, out_width), pred_data).map_err(|e| {
+                InferenceError::PredictionError {
+                    operation: "create prediction array".to_string(),
+                    message: e.to_string(),
+                }
+            })?;
+
+        let mut threshold_img: image::GrayImage =
+            ImageBuffer::new(out_width as u32, out_height as u32);
+        for y in 0..out_height {
+            for x in 0..out_width {
+                let idx = y * out_width + x;
+                let pixel_value = if threshold_data[idx] { 255u8 } else { 0u8 };
+                threshold_img.put_pixel(x as u32, y as u32, image::Luma([pixel_value]));
+            }
+        }
+
+        let dilated_img = dilate(&threshold_img, Norm::LInf, 1);
+
+        let text_boxes = self.get_text_boxes(&dilated_img, &pred_array)?;
+
+        Ok(text_boxes)
+    }
+
+    fn get_text_boxes(
+        &mut self,
+        threshold_img: &image::GrayImage,
+        pred_array: &Array2<f32>,
+    ) -> Result<Vec<TextBox>, InferenceError> {
+        const LONG_SIDE_THRESH: i32 = 3;
+        const MAX_CANDIDATES: usize = 1000;
+
+        let threshold_value = (self.box_thresh * 255.0) as u8;
+        let contours: Vec<Contour<i32>> =
+            find_contours_with_threshold(threshold_img, threshold_value);
+        let num_contours = contours.len().min(MAX_CANDIDATES);
+        let mut rs_boxes = Vec::new();
+
+        for contour in contours.iter().take(num_contours) {
+            if contour.points.len() <= 2 {
+                continue;
+            }
+
+            let contour_points: Vec<Point<i32>> = contour.points.clone();
+
+            let min_area_points = min_area_rect(&contour_points);
+
+            let min_area_coords: [Coord<i32>; 4] = [
+                Coord {
+                    x: min_area_points[0].x,
+                    y: min_area_points[0].y,
+                },
+                Coord {
+                    x: min_area_points[1].x,
+                    y: min_area_points[1].y,
+                },
+                Coord {
+                    x: min_area_points[2].x,
+                    y: min_area_points[2].y,
+                },
+                Coord {
+                    x: min_area_points[3].x,
+                    y: min_area_points[3].y,
+                },
+            ];
+
+            let (min_boxes, long_side) = box_utils::get_min_boxes(&min_area_coords);
+
+            if long_side < LONG_SIDE_THRESH as f32 {
+                continue;
+            }
+
+            let box_score = match box_utils::box_score(&min_boxes, pred_array) {
+                Ok(score) => score,
+                Err(_) => continue,
+            };
+
+            if box_score < self.box_score_thresh {
+                continue;
+            }
+
+            let unclipped_points = match box_utils::unclip_box(&min_boxes, self.unclip_ratio) {
+                Ok(points) => points,
+                Err(_) => continue,
+            };
+
+            let clip_points = min_area_rect(
+                &unclipped_points
+                    .iter()
+                    .map(|p| Point::new(p.x, p.y))
+                    .collect::<Vec<_>>(),
+            );
+
+            let clip_coords: [Coord<i32>; 4] = [
+                Coord {
+                    x: clip_points[0].x,
+                    y: clip_points[0].y,
+                }, // top-left
+                Coord {
+                    x: clip_points[1].x,
+                    y: clip_points[1].y,
+                }, // top-right
+                Coord {
+                    x: clip_points[2].x,
+                    y: clip_points[2].y,
+                }, // bottom-right
+                Coord {
+                    x: clip_points[3].x,
+                    y: clip_points[3].y,
+                }, // bottom-left
+            ];
+
+            let side1_len = (((clip_coords[1].x - clip_coords[0].x).pow(2) as f32)
+                + ((clip_coords[1].y - clip_coords[0].y).pow(2) as f32))
+                .sqrt();
+            let side2_len = (((clip_coords[2].x - clip_coords[1].x).pow(2) as f32)
+                + ((clip_coords[2].y - clip_coords[1].y).pow(2) as f32))
+                .sqrt();
+
+            if side1_len < 1.001 && side2_len < 1.001 {
+                continue;
+            }
+
+            let (clip_min_boxes, clip_long_side) = box_utils::get_min_boxes(&clip_coords);
+
+            if clip_long_side < (LONG_SIDE_THRESH + 2) as f32 {
+                continue;
+            }
+
+            let int_clip_min_boxes = self.rescale_box(
+                &clip_min_boxes,
+                pred_array.ncols() as i32,
+                pred_array.nrows() as i32,
+            );
+
+            rs_boxes.push(TextBox {
+                bounds: int_clip_min_boxes,
+                angle: None,
+                text: None,
+                box_score,
+                text_score: 0.0,
+                span: None,
+            });
+        }
+
+        Ok(rs_boxes)
+    }
+
+    fn rescale_box(
+        &self,
+        box_points: &[Coord<i32>; 4],
+        pred_width: i32,
+        pred_height: i32,
+    ) -> [Coord<i32>; 4] {
+        let mut result = [Coord { x: 0, y: 0 }; 4];
+
+        for (i, p) in box_points.iter().enumerate() {
+            let x_f = p.x as f32;
+            let y_f = p.y as f32;
+
+            let w_out = pred_width as f32;
+            let h_out = pred_height as f32;
+
+            if w_out < 1.0 || h_out < 1.0 {
+                result[i] = Coord { x: 0, y: 0 };
+                continue;
+            }
+
+            let x_dst = x_f * (self.dst_dimensions[0] as f32 / w_out);
+            let y_dst = y_f * (self.dst_dimensions[1] as f32 / h_out);
+
+            let w_scaled_content =
+                (self.dst_dimensions[0] - self.padding[2] - self.padding[3]) as f32;
+            let h_scaled_content =
+                (self.dst_dimensions[1] - self.padding[0] - self.padding[1]) as f32;
+
+            let x_on_scaled_content = x_dst - self.padding[2] as f32;
+            let y_on_scaled_content = y_dst - self.padding[0] as f32;
+
+            let mut x_orig = 0.0;
+            let mut y_orig = 0.0;
+
+            if w_scaled_content > 1e-6 {
+                x_orig = x_on_scaled_content * (self.src_dimensions[0] as f32 / w_scaled_content);
+            }
+
+            if h_scaled_content > 1e-6 {
+                y_orig = y_on_scaled_content * (self.src_dimensions[1] as f32 / h_scaled_content);
+            }
+
+            let max_x_coord = (self.src_dimensions[0] - 1).max(0) as f32;
+            let max_y_coord = (self.src_dimensions[1] - 1).max(0) as f32;
+
+            let pt_x = x_orig.clamp(0.0, max_x_coord) as i32;
+            let pt_y = y_orig.clamp(0.0, max_y_coord) as i32;
+
+            result[i] = Coord { x: pt_x, y: pt_y };
+        }
+
+        result
+    }
+
+    pub fn run(image: &RgbImage) -> Result<Vec<TextBox>, InferenceError> {
+        let instance = Self::instance()?;
+        let mut model = instance
+            .lock()
+            .map_err(|e| InferenceError::ProcessingError {
+                message: format!("Failed to lock DBNet instance: {e}"),
+            })?;
+
+        let preprocessed = model.preprocess(image)?;
+        model.detect(&preprocessed)
+    }
+}

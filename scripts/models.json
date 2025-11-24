@@ -1,0 +1,73 @@
+{
+    "text_detection": {
+        "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-OCRv5_server_det_infer.tar",
+        "dir": "PP-OCRv5_server_det_infer",
+        "output": "text_detection.onnx",
+        "model_filename": "inference.json",
+        "params_filename": "inference.pdiparams"
+    },
+    "text_recognition_en": {
+        "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0//en_PP-OCRv5_mobile_rec_infer.tar",
+        "language": "english",
+        "dir": "./en_PP-OCRv5_mobile_rec_infer",
+        "output": "text_recognition_en.onnx",
+        "model_filename": "inference.json",
+        "params_filename": "inference.pdiparams",
+        "dict_filename": "en_dict.txt"
+    },
+    "text_recognition_ch": {
+        "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0//chinese_cht_PP-OCRv3_mobile_rec_infer.tar",
+        "language": "chinese",
+        "dir": "chinese_cht_PP-OCRv3_mobile_rec_infer",
+        "output": "text_recognition_ch.onnx",
+        "model_filename": "inference.json", 
+        "params_filename": "inference.pdiparams",
+        "dict_filename": "chinese_cht_dict.txt"
+    },
+    "layout_detection": {
+        "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-DocLayout_plus-L_infer.tar",
+        "dir": "PP-DocLayout_plus-L_infer",
+        "output": "layout_detection.onnx",
+        "model_filename": "inference.json", 
+        "params_filename": "inference.pdiparams"
+    },
+    "document_orientation_classification":
+    {
+        "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-LCNet_x1_0_doc_ori_infer.tar",
+        "dir": "PP-LCNet_x1_0_doc_ori_infer",
+        "output": "document_orientation_classification.onnx",
+        "model_filename": "inference.json",
+        "params_filename": "inference.pdiparams"
+    },
+    "text_orientation_classification":
+    {
+        "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-LCNet_x1_0_textline_ori_infer.tar",
+        "dir": "PP-LCNet_x1_0_textline_ori_infer",
+        "output": "text_orientation_classification.onnx",
+        "model_filename": "inference.json",
+        "params_filename": "inference.pdiparams"
+    },
+    "phi4_mini_instruct": {
+        "type": "huggingface",
+        "repo": "microsoft/Phi-4-mini-instruct-onnx",
+        "variants": [
+            {
+                "name": "cpu",
+                "include_pattern": "cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/*",
+                "source_subdir": "cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4",
+                "onnx_files": ["model.onnx", "model.onnx.data"]
+            },
+            {
+                "name": "gpu",
+                "include_pattern": "gpu/gpu-int4-rtn-block-32/*",
+                "source_subdir": "gpu/gpu-int4-rtn-block-32",
+                "onnx_files": ["model.onnx", "model.onnx.data"]
+            }
+        ],
+        "output_dir": "phi4-mini-instruct",
+        "onnx_subdir": "phi-4-mini-instruct",
+        "tokenizer_files": ["special_tokens_map.json", "tokenizer_config.json", "tokenizer.json", "vocab.json"],
+        "tokenizer_dir": "phi-4-mini-instruct",
+        "tokenizer_source_subdir": "cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4"
+    }
+}

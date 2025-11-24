@@ -1,0 +1,43 @@
+{
+    "name": "Rust Development",
+    "build": {
+        "dockerfile": "../Dockerfile",
+        "target": "development"
+    },
+    "runArgs": [
+        "--gpus=all"
+    ],
+    "containerEnv": {
+        "DISPLAY": "${localEnv:DISPLAY}",
+        "WAYLAND_DISPLAY": "${localEnv:WAYLAND_DISPLAY}",
+        "XDG_RUNTIME_DIR": "${localEnv:XDG_RUNTIME_DIR}",
+        "PULSE_SERVER": "${localEnv:PULSE_SERVER}",
+        "NVIDIA_VISIBLE_DEVICES": "all",
+        "NVIDIA_DRIVER_CAPABILITIES": "compute,utility"
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "rust-lang.rust-analyzer",
+                "fill-labs.dependi",
+                "tamasfe.even-better-toml",
+                "vadimcn.vscode-lldb"
+            ],
+            "settings": {
+                "[rust]": {
+                    "editor.defaultFormatter": "rust-lang.rust-analyzer",
+                    "editor.formatOnSave": true
+                },                
+                "rust-analyzer.rustfmt.rangeFormatting.enable": true,
+                "rust-analyzer.server.extraEnv": {
+                    "RUSTUP_TOOLCHAIN": "stable"
+                },
+                "rust-analyzer.check.command": "clippy",
+                "rust-analyzer.check.onSave": true
+            }
+        }
+    },
+    "updateContentCommand": "rustup default stable && rustup component add rust-analyzer rustfmt clippy && cargo install cargo-watch cargo-edit",
+    "postCreateCommand": "rustup component add rustfmt",
+    "remoteUser": "developer"
+}
