@@ -58,17 +58,6 @@ impl Phi4MiniInference {
                 path: model_path.clone(),
                 source,
             })?
-            .with_execution_providers([
-                ort::execution_providers::TensorRTExecutionProvider::default()
-                    .with_device_id(0)
-                    .with_engine_cache(true)
-                    .with_engine_cache_path("/workspaces/DocYouMeant/models/trt_engines")
-                    .with_engine_cache_prefix("docyoumeant_")
-                    .with_max_workspace_size(5 << 30)
-                    .with_fp16(true)
-                    .with_timing_cache(true)
-                    .build(),
-            ])?
             .commit_from_file(&model_path)
             .map_err(|source| InferenceError::ModelFileLoadError {
                 path: model_path,
