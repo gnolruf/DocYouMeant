@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 use crate::document::content::{KeyValuePair, PageContent};
-use crate::document::text_box::TextBox;
+use crate::document::text_box::{Coord, DocumentSpan, Orientation, TextBox};
 use crate::inference::error::InferenceError;
 use crate::inference::phi4mini::Phi4MiniInference;
 
@@ -52,10 +52,37 @@ impl KeyValuePairExtractionTask {
         let mut used_indices = HashSet::new();
         let words = &page_content.words;
 
+        let mut word_infos = Vec::with_capacity(words.len());
+        let mut bigram_index: HashMap<String, Vec<usize>> = HashMap::new();
+
+        for (i, word) in words.iter().enumerate() {
+            let clean_text = if let Some(text) = &word.text {
+                text.replace(|c: char| !c.is_alphanumeric(), "")
+            } else {
+                String::new()
+            };
+
+            if !clean_text.is_empty() {
+                let prefix = if clean_text.len() >= 2 {
+                    &clean_text[0..2]
+                } else {
+                    &clean_text[0..1]
+                };
+                bigram_index.entry(prefix.to_string()).or_default().push(i);
+            }
+
+            word_infos.push(WordInfo {
+                clean_text,
+                original: word.clone(),
+            });
+        }
+
         for (key_str, value_str) in string_pairs {
-            let key_box = Self::find_text_box(&key_str, words, &mut used_indices);
+            let key_box =
+                Self::find_text_box(&key_str, &word_infos, &bigram_index, &mut used_indices);
             if let Some(k_box) = key_box {
-                let value_box = Self::find_text_box(&value_str, words, &mut used_indices);
+                let value_box =
+                    Self::find_text_box(&value_str, &word_infos, &bigram_index, &mut used_indices);
                 if let Some(v_box) = value_box {
                     result_pairs.push(KeyValuePair {
                         key: k_box,
@@ -72,7 +99,8 @@ impl KeyValuePairExtractionTask {
 
     fn find_text_box(
         target_text: &str,
-        words: &[TextBox],
+        word_infos: &[WordInfo],
+        bigram_index: &HashMap<String, Vec<usize>>,
         used_indices: &mut HashSet<usize>,
     ) -> Option<TextBox> {
         let target_clean = target_text.replace(|c: char| !c.is_alphanumeric(), "");
@@ -80,42 +108,123 @@ impl KeyValuePairExtractionTask {
             return None;
         }
 
-        for (i, _word) in words.iter().enumerate() {
-            if used_indices.contains(&i) {
+        let candidates = if target_clean.len() >= 2 {
+            let mut c = Vec::new();
+            if let Some(idxs) = bigram_index.get(&target_clean[0..2]) {
+                c.extend(idxs);
+            }
+            if let Some(idxs) = bigram_index.get(&target_clean[0..1]) {
+                c.extend(idxs);
+            }
+            c
+        } else {
+            bigram_index
+                .get(&target_clean[0..1])
+                .cloned()
+                .unwrap_or_default()
+        };
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        for &start_idx in &candidates {
+            if used_indices.contains(&start_idx) {
                 continue;
             }
 
             let mut current_indices = Vec::new();
             let mut accumulated_text = String::new();
-            let mut next_word_idx = i;
+            let mut next_word_idx = start_idx;
 
-            while next_word_idx < words.len() {
+            let mut min_x = i32::MAX;
+            let mut min_y = i32::MAX;
+            let mut max_x = i32::MIN;
+            let mut max_y = i32::MIN;
+            let mut total_box_score = 0.0;
+            let mut total_text_score = 0.0;
+            let mut text_parts = Vec::new();
+            let mut orientations = Vec::new();
+            let mut min_offset = usize::MAX;
+            let mut max_end = 0;
+            let mut has_span = false;
+
+            while next_word_idx < word_infos.len() {
                 if used_indices.contains(&next_word_idx) {
                     next_word_idx += 1;
                     continue;
                 }
 
-                if let Some(text) = &words[next_word_idx].text {
-                    let text_clean = text.replace(|c: char| !c.is_alphanumeric(), "");
-                    accumulated_text.push_str(&text_clean);
-                    current_indices.push(next_word_idx);
+                let info = &word_infos[next_word_idx];
+                if info.clean_text.is_empty() {
+                    next_word_idx += 1;
+                    continue;
+                }
 
-                    if accumulated_text == target_clean {
-                        for idx in &current_indices {
-                            used_indices.insert(*idx);
-                        }
-                        let matched_boxes: Vec<TextBox> = current_indices
-                            .iter()
-                            .map(|&idx| words[idx].clone())
-                            .collect();
-                        return TextBox::merge(&matched_boxes);
-                    } else if accumulated_text.len() > target_clean.len() {
-                        // Overshot, stop this path
-                        break;
-                    } else if !target_clean.starts_with(&accumulated_text) {
-                        // Mismatch, stop this path
-                        break;
+                accumulated_text.push_str(&info.clean_text);
+                current_indices.push(next_word_idx);
+
+                let b = &info.original;
+                for p in b.bounds {
+                    min_x = min_x.min(p.x);
+                    min_y = min_y.min(p.y);
+                    max_x = max_x.max(p.x);
+                    max_y = max_y.max(p.y);
+                }
+                total_box_score += b.box_score;
+                total_text_score += b.text_score;
+                if let Some(t) = &b.text {
+                    text_parts.push(t.clone());
+                }
+                if let Some(o) = b.angle {
+                    orientations.push(o);
+                }
+                if let Some(span) = b.span {
+                    has_span = true;
+                    min_offset = min_offset.min(span.offset);
+                    max_end = max_end.max(span.offset + span.length);
+                }
+
+                if accumulated_text == target_clean {
+                    for idx in &current_indices {
+                        used_indices.insert(*idx);
                     }
+
+                    let bounds = [
+                        Coord { x: min_x, y: min_y },
+                        Coord { x: max_x, y: min_y },
+                        Coord { x: max_x, y: max_y },
+                        Coord { x: min_x, y: max_y },
+                    ];
+
+                    let angle = Orientation::most_common(&orientations);
+                    let text = if text_parts.is_empty() {
+                        None
+                    } else {
+                        Some(text_parts.join(" "))
+                    };
+
+                    let count = current_indices.len() as f32;
+                    let span = if has_span && min_offset < max_end {
+                        Some(DocumentSpan::new(min_offset, max_end - min_offset))
+                    } else {
+                        None
+                    };
+
+                    return Some(TextBox {
+                        bounds,
+                        angle,
+                        text,
+                        box_score: total_box_score / count,
+                        text_score: total_text_score / count,
+                        span,
+                    });
+                } else if accumulated_text.len() > target_clean.len() {
+                    // Overshot, stop this path
+                    break;
+                } else if !target_clean.starts_with(&accumulated_text) {
+                    // Mismatch, stop this path
+                    break;
                 }
                 next_word_idx += 1;
             }
@@ -191,4 +300,9 @@ Output ONLY the JSON object:
 
         Ok(pairs)
     }
+}
+
+struct WordInfo {
+    clean_text: String,
+    original: TextBox,
 }

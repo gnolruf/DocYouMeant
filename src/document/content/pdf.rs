@@ -158,21 +158,26 @@ impl PdfContent {
         words: &mut Vec<TextBox>,
         orientation: Option<Orientation>,
     ) -> Result<(), DocumentError> {
+        use std::collections::HashSet;
+
         let mut accumulated_text_length = 0usize;
         let mut current_word_text = String::new();
         let mut current_word_bounds: Option<(f32, f32, f32, f32)> = None;
+
+        let mut seen_words: HashSet<(String, i32, i32, i32, i32)> = HashSet::new();
 
         for char_obj in text_page.chars().iter() {
             let char_text = char_obj.unicode_string().unwrap_or_default();
 
             if char_text.trim().is_empty() {
                 if !current_word_text.is_empty() {
-                    Self::push_word(
+                    Self::push_word_if_unique(
                         &current_word_text,
                         current_word_bounds,
                         orientation,
                         accumulated_text_length,
                         words,
+                        &mut seen_words,
                     );
                     accumulated_text_length += current_word_text.len() + 1;
                     current_word_text.clear();
@@ -203,24 +208,26 @@ impl PdfContent {
         }
 
         if !current_word_text.is_empty() {
-            Self::push_word(
+            Self::push_word_if_unique(
                 &current_word_text,
                 current_word_bounds,
                 orientation,
                 accumulated_text_length,
                 words,
+                &mut seen_words,
             );
         }
 
         Ok(())
     }
 
-    fn push_word(
+    fn push_word_if_unique(
         text: &str,
         bounds: Option<(f32, f32, f32, f32)>,
         orientation: Option<Orientation>,
         start_index: usize,
         words: &mut Vec<TextBox>,
+        seen_words: &mut std::collections::HashSet<(String, i32, i32, i32, i32)>,
     ) {
         if let Some((min_x, min_y, max_x, max_y)) = bounds {
             let word_bounds = [
@@ -242,17 +249,27 @@ impl PdfContent {
                 },
             ];
 
-            words.push(TextBox {
-                bounds: word_bounds,
-                angle: orientation,
-                text: Some(text.to_string()),
-                box_score: 1.0,
-                text_score: 1.0,
-                span: Some(crate::document::text_box::DocumentSpan::new(
-                    start_index,
-                    text.len(),
-                )),
-            });
+            let key = (
+                text.to_string(),
+                min_x as i32,
+                min_y as i32,
+                max_x as i32,
+                max_y as i32,
+            );
+
+            if seen_words.insert(key) {
+                words.push(TextBox {
+                    bounds: word_bounds,
+                    angle: orientation,
+                    text: Some(text.to_string()),
+                    box_score: 1.0,
+                    text_score: 1.0,
+                    span: Some(crate::document::text_box::DocumentSpan::new(
+                        start_index,
+                        text.len(),
+                    )),
+                });
+            }
         }
     }
 }
