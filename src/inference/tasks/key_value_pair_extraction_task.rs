@@ -235,34 +235,51 @@ impl KeyValuePairExtractionTask {
     fn build_system_message() -> String {
         r#"You are a document analysis expert. Extract key-value pairs from the document text provided by the user.
 
-INSTRUCTIONS:
-1. Extract ONLY explicit key-value pairs where a label/field name is followed by a value
-2. Keys must be EXACT text from the document (the label/field name as written)
-3. Values must be EXACT text from the document (preserve formatting, spacing, numbers)
-4. Common patterns: "FIELD: value", "FIELD value", "FIELD\nvalue"
-5. DO NOT extract addresses, phone numbers, or website URLs unless they have an explicit label
-6. DO NOT extract instructional text, warnings, or footer information
-7. DO NOT invent keys - only use labels that actually appear in the document
-8. DO NOT include metadata about the document itself unless explicitly labeled
-9. Return a flat JSON object (no nested arrays or objects)
-10. Return ONLY the JSON object with no markdown formatting, explanation, or extra text
+STRICT RULES:
+1. Extract ONLY explicit key-value pairs where a label/field name has a CONCRETE value
+2. The KEY is the field label (e.g., "Date", "Invoice Number", "Name")
+3. The VALUE is the actual data (e.g., "12/10/98", "12345", "John Smith")
+4. NEVER set a value to null - skip the pair entirely if there's no value
+5. NEVER include the value inside the key - separate them properly
+6. NEVER extract document titles, section headers, or form field names without values
+7. NEVER hallucinate or invent data - ONLY EXTRACT WHAT IS EXPLICITLY PRESENT
+8. NEVER arbitrarily repeat similar entries - THE DATA YOU PROVIDE MUST COME EXACTLY FROM THE TEXT
+9. Return ONLY valid JSON with string values
 
-Example patterns to extract:
-- "DATE: 12/10/98" → {"DATE": "12/10/98"}
-- "TO: John Smith" → {"TO": "John Smith"}
-- "Invoice Number: 12345" → {"Invoice Number: "12345"}
+CORRECT examples:
+- "Date: 12/10/98" → {"Date": "12/10/98"}
+- "Invoice Number 12345" → {"Invoice Number": "12345"}
+- "Lic # 48000040179" → {"Lic #": "48000040179"}
+- "Total Due: $1,234.56" → {"Total Due": "$1,234.56"}
+- "Ship To: John Doe" → {"Ship To": "John Doe"}
+- "Order Date: 2023-01-01" → {"Order Date": "2023-01-01"}
 
-DO NOT extract:
-- Unlabeled addresses or contact information
-- Instructions or warnings
-- Generic company information without labels
-- The prompt instructions themselves
+WRONG examples (DO NOT do these):
+- {"Lic #: 48000040179": "..."} ← value is inside the key
+- {"Document Title": null} ← null values are not allowed
+- {"Field Name": null} ← skip fields without values
+- {"Item #1": "X", "Item #2": "X", "Item #3": "X", ...} ← don't create repetitive entries
+- {"Invoice": "Invoice"} ← key and value are identical/redundant
+- {"Date": "Unknown"} ← do not invent "Unknown" values
+- {"Header": "Company Name"} ← do not label general text as "Header"
+- {"Legal Description SECTION: 7 BLOCK : 1961": null} ← value is inside the key, and value is set to null
+- {"Main File No. 1552474": null} ← value is inside the key, and value is set to null
+- {"Gross Living Area": null} ← null values are not allowed
+- {"Total Rooms": null} ← null values are not allowed
+- {"Total Bedrooms": null} ← null values are not allowed
+- {"Total Bathrooms": null} ← null values are not allowed
+- {"Location": null} ← null values are not allowed
+- {"View": null} ← null values are not allowed
+- {"Site": null} ← null values are not allowed
+- {"Quality": null} ← null values are not allowed
+- {"Age": null} ← null values are not allowed
 
-Output ONLY the JSON object:
+Output ONLY a valid JSON object with string keys and string values:
 {"key": "value", "key2": "value2"}"#.to_string()
     }
 
     fn parse_response(response: &str) -> Result<HashMap<String, String>, InferenceError> {
+        println!("Raw model response:\n{}", response);
         let cleaned = response
             .trim()
             .strip_prefix("```json")
@@ -292,6 +309,9 @@ Output ONLY the JSON object:
         let mut pairs = HashMap::new();
         for (key, value) in raw_pairs {
             if let Some(string_value) = value.as_str() {
+                if string_value.trim().eq_ignore_ascii_case("null") {
+                    continue;
+                }
                 pairs.insert(key, string_value.to_string());
             } else {
                 eprintln!("Warning: Skipping non-string value for key '{key}': {value:?}");

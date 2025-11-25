@@ -13,7 +13,7 @@ use tokenizers::Tokenizer;
 
 use crate::inference::error::InferenceError;
 
-const MAX_LENGTH: usize = 1000; // Max length of the generated text
+const MAX_LENGTH: usize = 4096; // Max length of the generated text
 const VOCAB_SIZE: usize = 200064; // Phi-4-mini-instruct vocabulary size
 
 static PHI4MINI_INSTANCE: OnceCell<Mutex<Phi4MiniInference>> = OnceCell::new();
@@ -434,6 +434,31 @@ impl Phi4MiniInference {
             }
 
             generated_tokens.push(token_id);
+
+            // Loop detection: Check for repetitions
+            let len = generated_tokens.len();
+            let mut is_looping = false;
+            for k in 1..=30 {
+                let required_reps = if k == 1 { 6 } else { 3 };
+                if len >= required_reps * k {
+                    let mut all_match = true;
+                    let last_slice = &generated_tokens[len - k..];
+                    for i in 1..required_reps {
+                        let prev_slice = &generated_tokens[len - (i + 1) * k..len - i * k];
+                        if last_slice != prev_slice {
+                            all_match = false;
+                            break;
+                        }
+                    }
+                    if all_match {
+                        is_looping = true;
+                        break;
+                    }
+                }
+            }
+            if is_looping {
+                break;
+            }
 
             let mut new_past_key_values = Vec::with_capacity(64);
             for i in 0..32 {
