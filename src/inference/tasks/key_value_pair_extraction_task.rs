@@ -244,81 +244,136 @@ STRICT RULES:
 6. NEVER extract document titles, section headers, or form field names without values
 7. NEVER hallucinate or invent data - ONLY EXTRACT WHAT IS EXPLICITLY PRESENT
 8. NEVER arbitrarily repeat similar entries - THE DATA YOU PROVIDE MUST COME EXACTLY FROM THE TEXT
-9. Return ONLY valid JSON with string values
+9. ONLY valid key value pairs with string keys and string values
 
 CORRECT examples:
-- "Date: 12/10/98" → {"Date": "12/10/98"}
-- "Invoice Number 12345" → {"Invoice Number": "12345"}
-- "Lic # 48000040179" → {"Lic #": "48000040179"}
-- "Total Due: $1,234.56" → {"Total Due": "$1,234.56"}
-- "Ship To: John Doe" → {"Ship To": "John Doe"}
-- "Order Date: 2023-01-01" → {"Order Date": "2023-01-01"}
+- "Date: 12/10/98" → "Date": "12/10/98"
+- "Invoice Number 12345" → "Invoice Number": "12345"
+- "Lic # 48000040179" → "Lic #": "48000040179"
+- "Total Due: $1,234.56" → "Total Due": "$1,234.56"
+- "Ship To: John Doe" → "Ship To": "John Doe"
+- "Order Date: 2023-01-01" → "Order Date": "2023-01-01"
 
 WRONG examples (DO NOT do these):
-- {"Lic #: 48000040179": "..."} ← value is inside the key
-- {"Document Title": null} ← null values are not allowed
-- {"Field Name": null} ← skip fields without values
-- {"Item #1": "X", "Item #2": "X", "Item #3": "X", ...} ← don't create repetitive entries
-- {"Invoice": "Invoice"} ← key and value are identical/redundant
-- {"Date": "Unknown"} ← do not invent "Unknown" values
-- {"Header": "Company Name"} ← do not label general text as "Header"
-- {"Legal Description SECTION: 7 BLOCK : 1961": null} ← value is inside the key, and value is set to null
-- {"Main File No. 1552474": null} ← value is inside the key, and value is set to null
-- {"Gross Living Area": null} ← null values are not allowed
-- {"Total Rooms": null} ← null values are not allowed
-- {"Total Bedrooms": null} ← null values are not allowed
-- {"Total Bathrooms": null} ← null values are not allowed
-- {"Location": null} ← null values are not allowed
-- {"View": null} ← null values are not allowed
-- {"Site": null} ← null values are not allowed
-- {"Quality": null} ← null values are not allowed
-- {"Age": null} ← null values are not allowed
+- "Lic #: 48000040179" → "Lic #": "48000040179" ← value is inside the key
+- "Document Title": null ← null values are not allowed
+- "Field Name": null ← skip fields without values
+- "Item #1": "X", "Item #2": "X", "Item #3": "X", ... ← don't create repetitive entries
+- "Invoice": "Invoice" ← key and value are identical/redundant
+- "Date": "Unknown" ← do not invent "Unknown" values
+- "Header": "Company Name" ← do not label general text as "Header"
+- "Legal Description SECTION: 7 BLOCK : 1961": null ← value is inside the key, and value is set to null
+- "Main File No. 1552474": null ← value is inside the key, and value is set to null
+- "Gross Living Area": null ← null values are not allowed
+- "Total Rooms": null ← null values are not allowed
+- "Total Bedrooms": null ← null values are not allowed
+- "Total Bathrooms": null ← null values are not allowed
+- "Location": null ← null values are not allowed
+- "View": null ← null values are not allowed
+- "Site": null ← null values are not allowed
+- "Quality": null ← null values are not allowed
+- "Age": null ← null values are not allowed
 
-Output ONLY a valid JSON object with string keys and string values:
+Output ONLY valid key value pairs with string keys and string values:
 {"key": "value", "key2": "value2"}"#.to_string()
     }
 
     fn parse_response(response: &str) -> Result<HashMap<String, String>, InferenceError> {
         println!("Raw model response:\n{}", response);
-        let cleaned = response
-            .trim()
-            .strip_prefix("```json")
-            .unwrap_or(response)
-            .strip_prefix("```")
-            .unwrap_or(response)
-            .strip_suffix("```")
-            .unwrap_or(response)
-            .trim();
-
-        let json_str = if let Some(start) = cleaned.find('{') {
-            if let Some(end) = cleaned.rfind('}') {
-                &cleaned[start..=end]
-            } else {
-                cleaned
-            }
-        } else {
-            return Ok(HashMap::new());
-        };
-
-        let raw_pairs: HashMap<String, serde_json::Value> = serde_json::from_str(json_str)
-            .map_err(|e| InferenceError::PredictionError {
-                operation: "parse JSON response".to_string(),
-                message: format!("Failed to parse JSON object: {e}\nResponse: {json_str}"),
-            })?;
-
         let mut pairs = HashMap::new();
-        for (key, value) in raw_pairs {
-            if let Some(string_value) = value.as_str() {
-                if string_value.trim().eq_ignore_ascii_case("null") {
+
+        let chars: Vec<char> = response.chars().collect();
+        let len = chars.len();
+        let mut i = 0;
+
+        while i < len {
+            if chars[i] == '"' {
+                let key_start = i;
+                if let Some((key, key_end)) = Self::extract_quoted_string(&chars, i) {
+                    i = key_end;
+
+                    while i < len && chars[i].is_whitespace() {
+                        i += 1;
+                    }
+
+                    if i < len && chars[i] == ':' {
+                        i += 1;
+
+                        while i < len && chars[i].is_whitespace() {
+                            i += 1;
+                        }
+
+                        if i + 4 <= len {
+                            let potential_null: String = chars[i..i + 4].iter().collect();
+                            if potential_null == "null" {
+                                i += 4;
+                                continue;
+                            }
+                        }
+
+                        if i < len && chars[i] == '"' {
+                            if let Some((value, value_end)) = Self::extract_quoted_string(&chars, i)
+                            {
+                                i = value_end;
+
+                                let key_trimmed = key.trim();
+                                let value_trimmed = value.trim();
+
+                                if !key_trimmed.is_empty()
+                                    && !value_trimmed.is_empty()
+                                    && !value_trimmed.eq_ignore_ascii_case("null")
+                                {
+                                    pairs
+                                        .insert(key_trimmed.to_string(), value_trimmed.to_string());
+                                }
+                                continue;
+                            }
+                        }
+                    }
+                } else {
+                    i = key_start + 1;
                     continue;
                 }
-                pairs.insert(key, string_value.to_string());
-            } else {
-                eprintln!("Warning: Skipping non-string value for key '{key}': {value:?}");
             }
+            i += 1;
         }
 
         Ok(pairs)
+    }
+
+    fn extract_quoted_string(chars: &[char], start: usize) -> Option<(String, usize)> {
+        if start >= chars.len() || chars[start] != '"' {
+            return None;
+        }
+
+        let mut result = String::new();
+        let mut i = start + 1;
+        let len = chars.len();
+
+        while i < len {
+            let c = chars[i];
+            if c == '"' {
+                return Some((result, i + 1));
+            } else if c == '\\' && i + 1 < len {
+                i += 1;
+                let escaped = chars[i];
+                match escaped {
+                    '"' => result.push('"'),
+                    '\\' => result.push('\\'),
+                    'n' => result.push('\n'),
+                    'r' => result.push('\r'),
+                    't' => result.push('\t'),
+                    _ => {
+                        result.push('\\');
+                        result.push(escaped);
+                    }
+                }
+            } else {
+                result.push(c);
+            }
+            i += 1;
+        }
+        None
     }
 }
 
