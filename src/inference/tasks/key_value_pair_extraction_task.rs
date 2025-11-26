@@ -23,6 +23,11 @@ impl Default for KeyValuePairExtractionResult {
     }
 }
 
+struct WordInfo {
+    clean_text: String,
+    original: TextBox,
+}
+
 pub struct KeyValuePairExtractionTask;
 
 impl KeyValuePairExtractionTask {
@@ -279,7 +284,6 @@ Output ONLY valid key value pairs with string keys and string values:
     }
 
     fn parse_response(response: &str) -> Result<HashMap<String, String>, InferenceError> {
-        println!("Raw model response:\n{}", response);
         let mut pairs = HashMap::new();
 
         let chars: Vec<char> = response.chars().collect();
@@ -375,9 +379,4 @@ Output ONLY valid key value pairs with string keys and string values:
         }
         None
     }
-}
-
-struct WordInfo {
-    clean_text: String,
-    original: TextBox,
 }
