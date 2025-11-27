@@ -13,7 +13,6 @@ use tower_http::trace::TraceLayer;
 use crate::inference::dbnet::DBNet;
 use crate::inference::lcnet::LCNet;
 use crate::inference::rtdetr::RtDetr;
-use crate::inference::tasks::key_value_pair_extraction_task::KeyValuePairExtractionTask;
 use crate::inference::tasks::question_and_answer_task::QuestionAndAnswerTask;
 
 pub fn create_app() -> Router {
@@ -40,7 +39,6 @@ pub async fn initialize_models() -> Result<(), Box<dyn std::error::Error>> {
     RtDetr::get_or_init()?;
 
     tracing::info!("  Loading Phi4Mini (language model)...");
-    KeyValuePairExtractionTask::get_or_init()?;
     QuestionAndAnswerTask::get_or_init()?;
 
     tracing::info!("All models preloaded successfully.");

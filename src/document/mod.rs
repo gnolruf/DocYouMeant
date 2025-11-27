@@ -11,14 +11,12 @@ pub use error::DocumentError;
 pub use layout_box::{LayoutBox, LayoutClass};
 pub use text_box::TextBox;
 
-use crate::document::content::KeyValuePair;
 use content::{CsvContent, ExcelContent, PdfContent, TextContent, WordContent};
 
 #[derive(Debug)]
 pub struct Document {
     doc_type: DocumentType,
     content: Option<Box<dyn DocumentContent>>,
-    key_value_pairs: Vec<KeyValuePair>,
     question_answers:
         Vec<crate::inference::tasks::question_and_answer_task::QuestionAndAnswerResult>,
     process_id: String,
@@ -53,7 +51,6 @@ impl Document {
         Ok(Document {
             doc_type,
             content: Some(content),
-            key_value_pairs: Vec::new(),
             question_answers: Vec::new(),
             process_id: "general".to_string(),
         })
@@ -88,9 +85,8 @@ impl Document {
         };
 
         let questions = questions.unwrap_or(&[]);
-        let (key_value_pairs, question_answers) = pipeline.analyze(content, questions)?;
+        let question_answers = pipeline.analyze(content, questions)?;
 
-        self.key_value_pairs = key_value_pairs;
         self.question_answers = question_answers;
 
         Ok(())
@@ -107,9 +103,6 @@ impl Document {
         let mut result = to_analyze_result(&self.doc_type, content, &self.process_id);
 
         // Set the analysis results from Document
-        if !self.key_value_pairs.is_empty() {
-            result.set_key_value_pairs(self.key_value_pairs.clone());
-        }
         if !self.question_answers.is_empty() {
             result.set_question_answers(self.question_answers.clone());
         }

@@ -17,18 +17,12 @@ use std::collections::HashSet;
 
 use ::image::RgbImage;
 
+use serde::{Deserialize, Serialize};
+
 use crate::document::layout_box::LayoutBox;
 use crate::document::region::DocumentRegion;
 use crate::document::text_box::{Orientation, TextBox};
 use crate::inference::tasks::question_and_answer_task::QuestionAndAnswerResult;
-
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KeyValuePair {
-    pub key: TextBox,
-    pub value: TextBox,
-}
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum DocumentType {
@@ -126,9 +120,6 @@ pub struct PageContent {
     pub text: Option<String>,
     /// Document orientation detected for this page
     pub orientation: Option<Orientation>,
-    /// Key-value pairs extracted from this page
-    #[serde(skip)]
-    pub key_value_pairs: Vec<KeyValuePair>,
     /// Question and Answer results for this page
     #[serde(skip)]
     pub question_answers: Vec<QuestionAndAnswerResult>,
@@ -145,7 +136,6 @@ impl PageContent {
             regions: Vec::new(),
             text: None,
             orientation: None,
-            key_value_pairs: Vec::new(),
             question_answers: Vec::new(),
         }
     }
@@ -160,7 +150,6 @@ impl PageContent {
             regions: Vec::new(),
             text: None,
             orientation: None,
-            key_value_pairs: Vec::new(),
             question_answers: Vec::new(),
         }
     }
@@ -175,7 +164,6 @@ impl PageContent {
             regions: Vec::new(),
             text: Some(text),
             orientation: None,
-            key_value_pairs: Vec::new(),
             question_answers: Vec::new(),
         }
     }

@@ -1,12 +1,11 @@
 use image::RgbImage;
 use tracing::{debug, info, instrument, warn};
 
-use crate::document::content::{DocumentContent, DocumentType, KeyValuePair, PageContent};
+use crate::document::content::{DocumentContent, DocumentType, PageContent};
 use crate::document::error::DocumentError;
 use crate::document::layout_box::LayoutBox;
 use crate::document::region::DocumentRegionBuilder;
 use crate::document::text_box::{Orientation, TextBox};
-use crate::inference::tasks::key_value_pair_extraction_task::KeyValuePairExtractionTask;
 use crate::inference::tasks::question_and_answer_task::QuestionAndAnswerTask;
 use crate::inference::{
     crnn::Crnn, dbnet::DBNet, error::InferenceError, lcnet::LCNet, rtdetr::RtDetr,
@@ -97,9 +96,6 @@ impl AnalysisPipeline {
                 }
 
                 if self.process_mode != ProcessMode::Read {
-                    let pairs = self.extract_key_value_pairs_from_page(page)?;
-                    page.key_value_pairs = pairs;
-
                     let qa_results = self.answer_questions_for_page(page, questions)?;
                     page.question_answers = qa_results;
                 }
@@ -128,18 +124,12 @@ impl AnalysisPipeline {
                 }
 
                 if self.process_mode != ProcessMode::Read {
-                    let pairs = self.extract_key_value_pairs_from_page(page)?;
-                    page.key_value_pairs = pairs;
-
                     let qa_results = self.answer_questions_for_page(page, questions)?;
                     page.question_answers = qa_results;
                 }
             }
             DocumentType::Text | DocumentType::Word => {
                 if self.process_mode != ProcessMode::Read {
-                    let pairs = self.extract_key_value_pairs_from_page(page)?;
-                    page.key_value_pairs = pairs;
-
                     let qa_results = self.answer_questions_for_page(page, questions)?;
                     page.question_answers = qa_results;
                 }
@@ -166,31 +156,6 @@ impl AnalysisPipeline {
         if !texts.is_empty() {
             page.text = Some(texts.join("\n"));
         }
-    }
-
-    fn extract_key_value_pairs_from_page(
-        &self,
-        page: &PageContent,
-    ) -> Result<Vec<KeyValuePair>, DocumentError> {
-        let mut pairs = Vec::new();
-
-        if let Some(ref text) = page.text {
-            if !text.trim().is_empty() {
-                match KeyValuePairExtractionTask::extract(page) {
-                    Ok(result) => {
-                        pairs = result.pairs;
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Failed to extract key-value pairs for page {}: {}",
-                            page.page_number, e
-                        );
-                    }
-                }
-            }
-        }
-
-        Ok(pairs)
     }
 
     fn answer_questions_for_page(
@@ -407,24 +372,19 @@ impl AnalysisPipeline {
         content: &mut dyn DocumentContent,
         questions: &[String],
     ) -> Result<
-        (
-            Vec<KeyValuePair>,
-            Vec<crate::inference::tasks::question_and_answer_task::QuestionAndAnswerResult>,
-        ),
+        Vec<crate::inference::tasks::question_and_answer_task::QuestionAndAnswerResult>,
         DocumentError,
     > {
         info!("Starting document analysis");
-        let mut all_key_value_pairs = Vec::new();
         let mut all_qa_results = Vec::new();
 
         let pages = content.get_pages_mut();
         for page in pages {
             self.process_page(page, questions)?;
 
-            all_key_value_pairs.extend(page.key_value_pairs.clone());
             all_qa_results.extend(page.question_answers.clone());
         }
 
-        Ok((all_key_value_pairs, all_qa_results))
+        Ok(all_qa_results)
     }
 }
