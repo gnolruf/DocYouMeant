@@ -32,7 +32,7 @@ impl LangUtils {
 
     pub fn get_all_language_configs(
     ) -> Result<HashMap<String, LanguageConfig>, Box<dyn std::error::Error>> {
-        let config_path = "models/lang_models.json";
+        let config_path = "models/ocr_lang_models.json";
         let config_content = fs::read_to_string(config_path)?;
         let configs: HashMap<String, LanguageConfig> = serde_json::from_str(&config_content)?;
         Ok(configs)
