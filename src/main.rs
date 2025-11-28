@@ -1,3 +1,4 @@
+use clap::Parser;
 use std::env;
 
 mod document;
@@ -5,8 +6,18 @@ mod inference;
 mod server;
 mod utils;
 
+#[derive(Parser, Debug)]
+#[command(name = "docyoumeant")]
+#[command(about = "A configurable document understanding pipeline server")]
+struct Args {
+    #[arg(long, short = 'l')]
+    language: Option<String>,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+
     setup_ort()?;
 
     tracing_subscriber::fmt()
@@ -16,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
-    run_server().await?;
+    run_server(args.language).await?;
 
     Ok(())
 }
@@ -34,12 +45,12 @@ fn setup_ort() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
+async fn run_server(language: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     let addr = std::env::var("DOCYOUMEANT_ADDR").unwrap_or_else(|_| "127.0.0.1:3000".to_string());
 
     let socket_addr: std::net::SocketAddr = addr.parse()?;
 
-    server::initialize_models().await?;
+    server::initialize_models(language.as_deref()).await?;
 
     server::start_server(socket_addr).await?;
 
