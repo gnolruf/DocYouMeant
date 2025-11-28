@@ -32,13 +32,15 @@ impl From<&str> for ProcessMode {
 pub struct AnalysisPipeline {
     document_type: DocumentType,
     process_mode: ProcessMode,
+    language: String,
 }
 
 impl AnalysisPipeline {
-    pub fn new(document_type: DocumentType, process_id: String) -> Self {
+    pub fn new(document_type: DocumentType, process_id: String, language: String) -> Self {
         Self {
             document_type,
             process_mode: ProcessMode::from(process_id.as_str()),
+            language,
         }
     }
 
@@ -349,7 +351,7 @@ impl AnalysisPipeline {
                 },
             })?;
 
-        let mut text_recognizer = Crnn::new("english")
+        let mut text_recognizer = Crnn::new(&self.language)
             .map_err(|source| DocumentError::ModelProcessingError { source })?;
 
         let words = text_recognizer

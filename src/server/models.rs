@@ -17,10 +17,18 @@ pub struct AnalyzeRequest {
     /// The process ID to use for analysis (e.g., "general", "read")
     #[serde(default = "default_process_id")]
     pub process_id: String,
+
+    /// The OCR language model to use for text recognition (e.g., "english", "chinese")
+    #[serde(default = "default_language")]
+    pub language: String,
 }
 
 fn default_process_id() -> String {
     "general".to_string()
+}
+
+fn default_language() -> String {
+    "english".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

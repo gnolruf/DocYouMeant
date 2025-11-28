@@ -21,7 +21,7 @@ models/download/
 models/onnx/
 models/tokenizer/
 models/trt_engines/
-models/lang_models.json
+models/ocr_lang_models.json
 # Environment files
 .env
 

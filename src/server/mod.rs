@@ -10,6 +10,7 @@ use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
+use crate::inference::crnn::Crnn;
 use crate::inference::dbnet::DBNet;
 use crate::inference::lcnet::LCNet;
 use crate::inference::rtdetr::RtDetr;
@@ -23,7 +24,9 @@ pub fn create_app() -> Router {
         .layer(TraceLayer::new_for_http())
 }
 
-pub async fn initialize_models() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn initialize_models(
+    ocr_language: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Preloading models...");
 
     tracing::info!("  Loading DBNet (text detection)...");
@@ -40,6 +43,11 @@ pub async fn initialize_models() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("  Loading Phi4Mini (language model)...");
     QuestionAndAnswerTask::get_or_init()?;
+
+    if let Some(language) = ocr_language {
+        tracing::info!("  Loading Crnn ({} text recognition)...", language);
+        let _ = Crnn::new(language)?;
+    }
 
     tracing::info!("All models preloaded successfully.");
 
