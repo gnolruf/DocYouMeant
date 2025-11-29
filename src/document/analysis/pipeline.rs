@@ -275,7 +275,8 @@ impl AnalysisPipeline {
         self.match_embedded_text_to_lines(&mut text_lines, &page.words);
         debug!("Matched embedded text to lines");
 
-        let language = match self.language.borrow().clone() {
+        let cached_language = self.language.borrow().clone();
+        let language = match cached_language {
             Some(lang) => {
                 debug!("Using provided/cached language: {}", lang);
                 lang
@@ -286,7 +287,7 @@ impl AnalysisPipeline {
                     text_lines.iter().filter_map(|tl| tl.text.clone()).collect();
                 let detection_result = LanguageDetectionTask::detect_from_text(&texts)
                     .map_err(|source| DocumentError::ModelProcessingError { source })?;
-                info!(
+                debug!(
                     "Detected language from embedded text: {}",
                     detection_result.language
                 );
@@ -381,7 +382,8 @@ impl AnalysisPipeline {
                 },
             })?;
 
-        let language = match self.language.borrow().clone() {
+        let cached_language = self.language.borrow().clone();
+        let language = match cached_language {
             Some(lang) => {
                 debug!("Using provided/cached language: {}", lang);
                 lang
