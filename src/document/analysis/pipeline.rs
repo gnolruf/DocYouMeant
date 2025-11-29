@@ -9,7 +9,11 @@ use crate::document::text_box::{Orientation, TextBox};
 use crate::inference::tasks::language_detection_task::LanguageDetectionTask;
 use crate::inference::tasks::question_and_answer_task::QuestionAndAnswerTask;
 use crate::inference::{
-    crnn::Crnn, dbnet::DBNet, error::InferenceError, lcnet::LCNet, rtdetr::RtDetr,
+    crnn::Crnn,
+    dbnet::DBNet,
+    error::InferenceError,
+    lcnet::{LCNet, LCNetMode, LCNetResult},
+    rtdetr::RtDetr,
 };
 use crate::utils::{box_utils, image_utils};
 
@@ -219,8 +223,23 @@ impl AnalysisPipeline {
             return Ok(orientation);
         }
 
-        let orientations = LCNet::get_angles(std::slice::from_ref(image), false, false)
-            .map_err(|source| DocumentError::ModelProcessingError { source })?;
+        let orientations = match LCNet::run(
+            std::slice::from_ref(image),
+            LCNetMode::DocumentOrientation,
+            false,
+        )
+        .map_err(|source| DocumentError::ModelProcessingError { source })?
+        {
+            LCNetResult::Orientations(orientations) => orientations,
+            LCNetResult::TableTypes(_) => {
+                return Err(DocumentError::ModelProcessingError {
+                    source: InferenceError::ProcessingError {
+                        message: "Unexpected table types result for document orientation"
+                            .to_string(),
+                    },
+                });
+            }
+        };
 
         Ok(orientations
             .first()
@@ -366,8 +385,18 @@ impl AnalysisPipeline {
                 }
             })?;
 
-        let angles = LCNet::run(&image_parts, true)
-            .map_err(|source| DocumentError::ModelProcessingError { source })?;
+        let angles = match LCNet::run(&image_parts, LCNetMode::TextOrientation, true)
+            .map_err(|source| DocumentError::ModelProcessingError { source })?
+        {
+            LCNetResult::Orientations(orientations) => orientations,
+            LCNetResult::TableTypes(_) => {
+                return Err(DocumentError::ModelProcessingError {
+                    source: InferenceError::ProcessingError {
+                        message: "Unexpected table types result for text orientation".to_string(),
+                    },
+                });
+            }
+        };
 
         for (i, angle) in angles.iter().enumerate() {
             if i < text_lines.len() {

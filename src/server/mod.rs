@@ -12,7 +12,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::inference::crnn::Crnn;
 use crate::inference::dbnet::DBNet;
-use crate::inference::lcnet::LCNet;
+use crate::inference::lcnet::{LCNet, LCNetMode};
 use crate::inference::rtdetr::RtDetr;
 use crate::inference::tasks::question_and_answer_task::QuestionAndAnswerTask;
 
@@ -33,10 +33,10 @@ pub async fn initialize_models(
     DBNet::get_or_init()?;
 
     tracing::info!("  Loading LCNet (document orientation)...");
-    LCNet::get_or_init(false)?;
+    LCNet::get_or_init(LCNetMode::DocumentOrientation)?;
 
     tracing::info!("  Loading LCNet (text orientation)...");
-    LCNet::get_or_init(true)?;
+    LCNet::get_or_init(LCNetMode::TextOrientation)?;
 
     tracing::info!("  Loading RtDetr (layout detection)...");
     RtDetr::get_or_init()?;

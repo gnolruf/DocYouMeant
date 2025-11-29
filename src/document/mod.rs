@@ -3,12 +3,14 @@ pub mod content;
 pub mod error;
 pub mod layout_box;
 pub mod region;
+pub mod table;
 pub mod text_box;
 
 pub use analysis::{to_analyze_result, AnalysisPipeline, AnalysisResult};
 pub use content::{DocumentContent, DocumentType, ImageContent};
 pub use error::DocumentError;
 pub use layout_box::{LayoutBox, LayoutClass};
+pub use table::TableType;
 pub use text_box::TextBox;
 
 use content::{CsvContent, ExcelContent, PdfContent, TextContent, WordContent};
