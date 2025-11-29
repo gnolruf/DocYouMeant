@@ -120,6 +120,9 @@ pub struct PageContent {
     pub text: Option<String>,
     /// Document orientation detected for this page
     pub orientation: Option<Orientation>,
+    /// The language detected or used for OCR on this page
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detected_language: Option<String>,
     /// Question and Answer results for this page
     #[serde(skip)]
     pub question_answers: Vec<QuestionAndAnswerResult>,
@@ -136,6 +139,7 @@ impl PageContent {
             regions: Vec::new(),
             text: None,
             orientation: None,
+            detected_language: None,
             question_answers: Vec::new(),
         }
     }
@@ -150,6 +154,7 @@ impl PageContent {
             regions: Vec::new(),
             text: None,
             orientation: None,
+            detected_language: None,
             question_answers: Vec::new(),
         }
     }
@@ -164,6 +169,7 @@ impl PageContent {
             regions: Vec::new(),
             text: Some(text),
             orientation: None,
+            detected_language: None,
             question_answers: Vec::new(),
         }
     }

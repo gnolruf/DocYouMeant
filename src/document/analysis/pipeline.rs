@@ -6,13 +6,20 @@ use crate::document::error::DocumentError;
 use crate::document::layout_box::LayoutBox;
 use crate::document::region::DocumentRegionBuilder;
 use crate::document::text_box::{Orientation, TextBox};
+use crate::inference::tasks::language_detection_task::LanguageDetectionTask;
 use crate::inference::tasks::question_and_answer_task::QuestionAndAnswerTask;
 use crate::inference::{
     crnn::Crnn, dbnet::DBNet, error::InferenceError, lcnet::LCNet, rtdetr::RtDetr,
 };
 use crate::utils::{box_utils, image_utils};
 
-type ImageProcessingResult = (Vec<TextBox>, Vec<TextBox>, Vec<LayoutBox>, Orientation);
+type ImageProcessingResult = (
+    Vec<TextBox>,
+    Vec<TextBox>,
+    Vec<LayoutBox>,
+    Orientation,
+    String,
+);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcessMode {
@@ -32,15 +39,15 @@ impl From<&str> for ProcessMode {
 pub struct AnalysisPipeline {
     document_type: DocumentType,
     process_mode: ProcessMode,
-    language: String,
+    language: std::cell::RefCell<Option<String>>,
 }
 
 impl AnalysisPipeline {
-    pub fn new(document_type: DocumentType, process_id: String, language: String) -> Self {
+    pub fn new(document_type: DocumentType, process_id: String, language: Option<String>) -> Self {
         Self {
             document_type,
             process_mode: ProcessMode::from(process_id.as_str()),
-            language,
+            language: std::cell::RefCell::new(language),
         }
     }
 
@@ -59,12 +66,13 @@ impl AnalysisPipeline {
                 if let Some(image) = page.image.as_ref() {
                     if page.has_embedded_text_data() {
                         debug!("Processing PDF with embedded text");
-                        let (text_lines, layout_boxes, orientation) =
+                        let (text_lines, layout_boxes, orientation, language) =
                             self.process_pdf_with_embedded_text(image, page)?;
 
                         page.orientation = Some(orientation);
                         page.layout_boxes = layout_boxes.clone();
                         page.text_lines = text_lines.clone();
+                        page.detected_language = Some(language);
 
                         self.update_page_text(page);
 
@@ -76,12 +84,13 @@ impl AnalysisPipeline {
                         page.regions = regions;
                     } else {
                         debug!("Processing PDF as image");
-                        let (text_lines, words, layout_boxes, orientation) =
+                        let (text_lines, words, layout_boxes, orientation, language) =
                             self.process_image_document(image)?;
 
                         page.orientation = Some(orientation);
                         page.layout_boxes = layout_boxes.clone();
                         page.text_lines = text_lines.clone();
+                        page.detected_language = Some(language);
                         if !words.is_empty() {
                             page.words = words;
                         }
@@ -105,12 +114,13 @@ impl AnalysisPipeline {
             DocumentType::Png | DocumentType::Jpeg | DocumentType::Tiff => {
                 debug!("Processing image document");
                 if let Some(image) = page.image.as_ref() {
-                    let (text_lines, words, layout_boxes, orientation) =
+                    let (text_lines, words, layout_boxes, orientation, language) =
                         self.process_image_document(image)?;
 
                     page.orientation = Some(orientation);
                     page.layout_boxes = layout_boxes.clone();
                     page.text_lines = text_lines.clone();
+                    page.detected_language = Some(language);
                     if !words.is_empty() {
                         page.words = words;
                     }
@@ -249,7 +259,7 @@ impl AnalysisPipeline {
         &self,
         image: &RgbImage,
         page: &PageContent,
-    ) -> Result<(Vec<TextBox>, Vec<LayoutBox>, Orientation), DocumentError> {
+    ) -> Result<(Vec<TextBox>, Vec<LayoutBox>, Orientation, String), DocumentError> {
         let document_orientation = self.get_document_orientation(image, page.orientation)?;
         debug!("Document orientation: {:?}", document_orientation);
 
@@ -265,13 +275,34 @@ impl AnalysisPipeline {
         self.match_embedded_text_to_lines(&mut text_lines, &page.words);
         debug!("Matched embedded text to lines");
 
+        let cached_language = self.language.borrow().clone();
+        let language = match cached_language {
+            Some(lang) => {
+                debug!("Using provided/cached language: {}", lang);
+                lang
+            }
+            None => {
+                debug!("No language provided, running language detection on embedded text");
+                let texts: Vec<String> =
+                    text_lines.iter().filter_map(|tl| tl.text.clone()).collect();
+                let detection_result = LanguageDetectionTask::detect_from_text(&texts)
+                    .map_err(|source| DocumentError::ModelProcessingError { source })?;
+                debug!(
+                    "Detected language from embedded text: {}",
+                    detection_result.language
+                );
+                *self.language.borrow_mut() = Some(detection_result.language.clone());
+                detection_result.language
+            }
+        };
+
         let layout_boxes = if self.process_mode == ProcessMode::Read {
             Vec::new()
         } else {
             self.detect_layout(&oriented_image)?
         };
 
-        Ok((text_lines, layout_boxes, document_orientation))
+        Ok((text_lines, layout_boxes, document_orientation, language))
     }
 
     fn match_embedded_text_to_lines(&self, text_lines: &mut [TextBox], embedded_words: &[TextBox]) {
@@ -351,7 +382,27 @@ impl AnalysisPipeline {
                 },
             })?;
 
-        let mut text_recognizer = Crnn::new(&self.language)
+        let cached_language = self.language.borrow().clone();
+        let language = match cached_language {
+            Some(lang) => {
+                debug!("Using provided/cached language: {}", lang);
+                lang
+            }
+            None => {
+                debug!("No language provided, running language detection");
+                let detection_result =
+                    LanguageDetectionTask::detect(&text_lines, &rotated_parts)
+                        .map_err(|source| DocumentError::ModelProcessingError { source })?;
+                debug!(
+                    "Detected language: {} (confidence: {:.2})",
+                    detection_result.language, detection_result.confidence
+                );
+                *self.language.borrow_mut() = Some(detection_result.language.clone());
+                detection_result.language
+            }
+        };
+
+        let mut text_recognizer = Crnn::new(&language)
             .map_err(|source| DocumentError::ModelProcessingError { source })?;
 
         let words = text_recognizer
@@ -365,7 +416,13 @@ impl AnalysisPipeline {
             self.detect_layout(&oriented_image)?
         };
 
-        Ok((text_lines, words, layout_boxes, document_orientation))
+        Ok((
+            text_lines,
+            words,
+            layout_boxes,
+            document_orientation,
+            language,
+        ))
     }
 
     #[instrument(skip(self, content, questions))]
