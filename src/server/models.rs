@@ -72,7 +72,6 @@ impl ErrorResponse {
 pub struct HealthResponse {
     pub status: String,
     pub version: String,
-    pub api_version: String,
 }
 
 impl HealthResponse {
@@ -80,7 +79,6 @@ impl HealthResponse {
         Self {
             status: "ok".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
-            api_version: "2024-11-30".to_string(),
         }
     }
 }
