@@ -149,6 +149,30 @@
         "model_filename": "inference.json",
         "params_filename": "inference.pdiparams"
     },
+    "table_classification":
+    {
+        "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-LCNet_x1_0_table_cls_infer.tar",
+        "dir": "./PP-LCNet_x1_0_table_cls_infer",
+        "output": "table_classification.onnx",
+        "model_filename": "inference.json",
+        "params_filename": "inference.pdiparams"
+    },
+    "wired_table_cell_detection":
+    {
+        "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/RT-DETR-L_wired_table_cell_det_infer.tar",
+        "dir": "./RT-DETR-L_wired_table_cell_det_infer",
+        "output": "wired_table_cell_detection.onnx",
+        "model_filename": "inference.json",
+        "params_filename": "inference.pdiparams"
+    },
+    "wireless_table_cell_detection":
+    {
+        "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/RT-DETR-L_wireless_table_cell_det_infer.tar",
+        "dir": "./RT-DETR-L_wireless_table_cell_det_infer",
+        "output": "wireless_table_cell_detection.onnx",
+        "model_filename": "inference.json",
+        "params_filename": "inference.pdiparams"
+    },
     "phi4_mini_instruct": {
         "type": "huggingface",
         "repo": "microsoft/Phi-4-mini-instruct-onnx",

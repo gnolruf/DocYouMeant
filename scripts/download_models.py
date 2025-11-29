@@ -261,7 +261,7 @@ def main():
     )
     args = parser.parse_args()
     
-    models_config_path = Path(__file__).parent / "models.json"
+    models_config_path = Path(__file__).parent.parent / "models" / "models.json"
     models = load_models_config(models_config_path)
     
     models_to_process = filter_models_by_language(models, args.language)
