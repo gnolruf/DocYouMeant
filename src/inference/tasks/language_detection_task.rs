@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use image::RgbImage;
-use lingua::{Language, LanguageDetector, LanguageDetectorBuilder};
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
@@ -120,133 +119,6 @@ impl LanguageDetectionTask {
         Ok((avg_score, recognized_texts))
     }
 
-    fn detect_language_with_lingua(
-        texts: &[String],
-        candidate_languages: &[String],
-    ) -> Option<String> {
-        if texts.is_empty() || candidate_languages.is_empty() {
-            return None;
-        }
-
-        let lingua_languages: Vec<Language> = candidate_languages
-            .iter()
-            .filter_map(|lang| Self::map_to_lingua_language(lang))
-            .collect();
-
-        if lingua_languages.is_empty() {
-            return candidate_languages.first().cloned();
-        }
-
-        let detector: LanguageDetector = LanguageDetectorBuilder::from_languages(&lingua_languages)
-            .with_preloaded_language_models()
-            .build();
-
-        let combined_text = texts.join(" ");
-
-        detector
-            .detect_language_of(&combined_text)
-            .and_then(Self::map_from_lingua_language)
-            .or_else(|| candidate_languages.first().cloned())
-    }
-
-    fn map_to_lingua_language(language: &str) -> Option<Language> {
-        match language.to_lowercase().as_str() {
-            "english" => Some(Language::English),
-            "spanish" => Some(Language::Spanish),
-            "french" => Some(Language::French),
-            "german" => Some(Language::German),
-            "italian" => Some(Language::Italian),
-            "portuguese" => Some(Language::Portuguese),
-            "dutch" => Some(Language::Dutch),
-            "turkish" => Some(Language::Turkish),
-            "indonesian" => Some(Language::Indonesian),
-            "malay" => Some(Language::Malay),
-            "vietnamese" => Some(Language::Vietnamese),
-            "tagalog" => Some(Language::Tagalog),
-            "swahili" => Some(Language::Swahili),
-            "swedish" => Some(Language::Swedish),
-            "norwegian" => Some(Language::Bokmal),
-            "danish" => Some(Language::Danish),
-            "finnish" => Some(Language::Finnish),
-            "hungarian" => Some(Language::Hungarian),
-            "romanian" => Some(Language::Romanian),
-            "catalan" => Some(Language::Catalan),
-            "basque" => Some(Language::Basque),
-            "welsh" => Some(Language::Welsh),
-            "irish" => Some(Language::Irish),
-            "icelandic" => Some(Language::Icelandic),
-            "latvian" => Some(Language::Latvian),
-            "lithuanian" => Some(Language::Lithuanian),
-            "estonian" => Some(Language::Estonian),
-            "afrikaans" => Some(Language::Afrikaans),
-            "zulu" => Some(Language::Zulu),
-            "xhosa" => Some(Language::Xhosa),
-            "somali" => Some(Language::Somali),
-            "yoruba" => Some(Language::Yoruba),
-            "chinese" => Some(Language::Chinese),
-            "japanese" => Some(Language::Japanese),
-            "thai" => Some(Language::Thai),
-            "greek" => Some(Language::Greek),
-            "arabic" => Some(Language::Arabic),
-            "hindi" => Some(Language::Hindi),
-            "marathi" => Some(Language::Marathi),
-            "kazakh" => Some(Language::Kazakh),
-            "mongolian" => Some(Language::Mongolian),
-            "telegu" => Some(Language::Telugu),
-            "tamil" => Some(Language::Tamil),
-            _ => None,
-        }
-    }
-
-    fn map_from_lingua_language(language: Language) -> Option<String> {
-        match language {
-            Language::English => Some("english".to_string()),
-            Language::Spanish => Some("spanish".to_string()),
-            Language::French => Some("french".to_string()),
-            Language::German => Some("german".to_string()),
-            Language::Italian => Some("italian".to_string()),
-            Language::Portuguese => Some("portuguese".to_string()),
-            Language::Dutch => Some("dutch".to_string()),
-            Language::Turkish => Some("turkish".to_string()),
-            Language::Indonesian => Some("indonesian".to_string()),
-            Language::Malay => Some("malay".to_string()),
-            Language::Vietnamese => Some("vietnamese".to_string()),
-            Language::Tagalog => Some("tagalog".to_string()),
-            Language::Swahili => Some("swahili".to_string()),
-            Language::Swedish => Some("swedish".to_string()),
-            Language::Bokmal => Some("norwegian".to_string()),
-            Language::Danish => Some("danish".to_string()),
-            Language::Finnish => Some("finnish".to_string()),
-            Language::Hungarian => Some("hungarian".to_string()),
-            Language::Romanian => Some("romanian".to_string()),
-            Language::Catalan => Some("catalan".to_string()),
-            Language::Basque => Some("basque".to_string()),
-            Language::Welsh => Some("welsh".to_string()),
-            Language::Irish => Some("irish".to_string()),
-            Language::Icelandic => Some("icelandic".to_string()),
-            Language::Latvian => Some("latvian".to_string()),
-            Language::Lithuanian => Some("lithuanian".to_string()),
-            Language::Estonian => Some("estonian".to_string()),
-            Language::Afrikaans => Some("afrikaans".to_string()),
-            Language::Zulu => Some("zulu".to_string()),
-            Language::Xhosa => Some("xhosa".to_string()),
-            Language::Somali => Some("somali".to_string()),
-            Language::Yoruba => Some("yoruba".to_string()),
-            Language::Chinese => Some("chinese".to_string()),
-            Language::Japanese => Some("japanese".to_string()),
-            Language::Thai => Some("thai".to_string()),
-            Language::Greek => Some("greek".to_string()),
-            Language::Arabic => Some("arabic".to_string()),
-            Language::Hindi => Some("hindi".to_string()),
-            Language::Marathi => Some("marathi".to_string()),
-            Language::Kazakh => Some("kazakh".to_string()),
-            Language::Mongolian => Some("mongolian".to_string()),
-            Language::Telugu => Some("telegu".to_string()),
-            Language::Tamil => Some("tamil".to_string()),
-            _ => None,
-        }
-    }
-
     pub fn detect(
         text_boxes: &[TextBox],
         part_images: &[RgbImage],
@@ -322,7 +194,7 @@ impl LanguageDetectionTask {
             candidate_languages.push("chinese".to_string());
         }
 
-        let language = Self::detect_language_with_lingua(&recognized_texts, &candidate_languages)
+        let language = LangUtils::detect_language(&recognized_texts, &candidate_languages)
             .unwrap_or_else(|| best_group.languages.first().cloned().unwrap_or_default());
 
         Ok(LanguageDetectionResult::new(
@@ -330,5 +202,28 @@ impl LanguageDetectionTask {
             best_group.model_file,
             confidence,
         ))
+    }
+
+    pub fn detect_from_text(texts: &[String]) -> Result<LanguageDetectionResult, InferenceError> {
+        if texts.is_empty() {
+            return Err(InferenceError::PreprocessingError {
+                operation: "validate input".to_string(),
+                message: "No text provided for language detection".to_string(),
+            });
+        }
+
+        let configs = LangUtils::get_all_language_configs(false).map_err(|e| {
+            InferenceError::PreprocessingError {
+                operation: "load language configs".to_string(),
+                message: e.to_string(),
+            }
+        })?;
+
+        let candidate_languages: Vec<String> = configs.keys().cloned().collect();
+
+        let language = LangUtils::detect_language(texts, &candidate_languages)
+            .unwrap_or_else(|| "english".to_string());
+
+        Ok(LanguageDetectionResult::new(language, String::new(), 1.0))
     }
 }

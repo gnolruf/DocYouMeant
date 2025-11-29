@@ -66,12 +66,13 @@ impl AnalysisPipeline {
                 if let Some(image) = page.image.as_ref() {
                     if page.has_embedded_text_data() {
                         debug!("Processing PDF with embedded text");
-                        let (text_lines, layout_boxes, orientation) =
+                        let (text_lines, layout_boxes, orientation, language) =
                             self.process_pdf_with_embedded_text(image, page)?;
 
                         page.orientation = Some(orientation);
                         page.layout_boxes = layout_boxes.clone();
                         page.text_lines = text_lines.clone();
+                        page.detected_language = Some(language);
 
                         self.update_page_text(page);
 
@@ -258,7 +259,7 @@ impl AnalysisPipeline {
         &self,
         image: &RgbImage,
         page: &PageContent,
-    ) -> Result<(Vec<TextBox>, Vec<LayoutBox>, Orientation), DocumentError> {
+    ) -> Result<(Vec<TextBox>, Vec<LayoutBox>, Orientation, String), DocumentError> {
         let document_orientation = self.get_document_orientation(image, page.orientation)?;
         debug!("Document orientation: {:?}", document_orientation);
 
@@ -274,13 +275,32 @@ impl AnalysisPipeline {
         self.match_embedded_text_to_lines(&mut text_lines, &page.words);
         debug!("Matched embedded text to lines");
 
+        let language = match &self.language {
+            Some(lang) => {
+                debug!("Using provided language: {}", lang);
+                lang.clone()
+            }
+            None => {
+                debug!("No language provided, running language detection on embedded text");
+                let texts: Vec<String> =
+                    text_lines.iter().filter_map(|tl| tl.text.clone()).collect();
+                let detection_result = LanguageDetectionTask::detect_from_text(&texts)
+                    .map_err(|source| DocumentError::ModelProcessingError { source })?;
+                info!(
+                    "Detected language from embedded text: {}",
+                    detection_result.language
+                );
+                detection_result.language
+            }
+        };
+
         let layout_boxes = if self.process_mode == ProcessMode::Read {
             Vec::new()
         } else {
             self.detect_layout(&oriented_image)?
         };
 
-        Ok((text_lines, layout_boxes, document_orientation))
+        Ok((text_lines, layout_boxes, document_orientation, language))
     }
 
     fn match_embedded_text_to_lines(&self, text_lines: &mut [TextBox], embedded_words: &[TextBox]) {
