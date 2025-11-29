@@ -1,5 +1,4 @@
 use axum::response::Json;
-use base64::{engine::general_purpose::STANDARD, Engine};
 
 use super::error::AppError;
 use super::models::{AnalyzeRequest, AnalyzeResponse, HealthResponse};
@@ -19,11 +18,10 @@ pub async fn analyze_document(
         request.filename
     );
 
-    let document_bytes = STANDARD
-        .decode(&request.data)
-        .map_err(|e| AppError::BadRequest(format!("Invalid base64 data: {e}")))?;
+    let document_bytes = request.validate_and_decode()?;
+    let filename = request.sanitized_filename();
 
-    let mut document = Document::new(&document_bytes, &request.filename)?;
+    let mut document = Document::new(&document_bytes, &filename)?;
 
     tracing::info!("Document loaded with type: {:?}", document.doc_type());
 

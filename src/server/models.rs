@@ -1,13 +1,23 @@
-use crate::document::AnalysisResult;
+use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
+
+use super::error::ValidationError;
+use crate::document::AnalysisResult;
+
+/// Maximum allowed file size in bytes (1 GB)
+const MAX_FILE_SIZE_BYTES: usize = 1024 * 1024 * 1024;
+
+/// Base64 encoding expands data by ~4/3, so we calculate the max encoded length
+const MAX_BASE64_LENGTH: usize = (MAX_FILE_SIZE_BYTES / 3 + 1) * 4;
+
+const FORBIDDEN_FILENAME_CHARS: &[char] = &['/', '\0'];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyzeRequest {
     /// Base64-encoded document data
     pub data: String,
 
-    /// Filename with extension (e.g., "document.pdf", "image.jpg")
-    /// The extension is used to determine the document type
+    /// Filename with extension
     pub filename: String,
 
     /// Optional list of questions to answer about the document
@@ -26,6 +36,61 @@ pub struct AnalyzeRequest {
 
 fn default_process_id() -> String {
     "general".to_string()
+}
+
+impl AnalyzeRequest {
+    pub fn validate_and_decode(&self) -> Result<Vec<u8>, ValidationError> {
+        self.validate_filename()?;
+        self.validate_and_decode_base64()
+    }
+
+    fn validate_and_decode_base64(&self) -> Result<Vec<u8>, ValidationError> {
+        if self.data.len() > MAX_BASE64_LENGTH {
+            return Err(ValidationError::Base64DataTooLarge);
+        }
+
+        let decoded = STANDARD
+            .decode(&self.data)
+            .map_err(|e| ValidationError::InvalidBase64(e.to_string()))?;
+
+        if decoded.len() > MAX_FILE_SIZE_BYTES {
+            return Err(ValidationError::FileSizeTooLarge);
+        }
+
+        Ok(decoded)
+    }
+
+    fn validate_filename(&self) -> Result<(), ValidationError> {
+        let filename = self.filename.trim();
+
+        if filename.is_empty() {
+            return Err(ValidationError::EmptyFilename);
+        }
+
+        if filename.len() > 255 {
+            return Err(ValidationError::FilenameTooLong);
+        }
+
+        for ch in filename.chars() {
+            if FORBIDDEN_FILENAME_CHARS.contains(&ch) {
+                return Err(ValidationError::ForbiddenCharacter(ch));
+            }
+        }
+
+        if !filename.contains('.') || filename.ends_with('.') {
+            return Err(ValidationError::MissingExtension);
+        }
+
+        if filename.starts_with('.') || filename.starts_with(' ') || filename.ends_with(' ') {
+            return Err(ValidationError::InvalidFilenameEdges);
+        }
+
+        Ok(())
+    }
+
+    pub fn sanitized_filename(&self) -> String {
+        self.filename.trim().to_string()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
