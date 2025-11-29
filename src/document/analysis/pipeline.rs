@@ -13,7 +13,13 @@ use crate::inference::{
 };
 use crate::utils::{box_utils, image_utils};
 
-type ImageProcessingResult = (Vec<TextBox>, Vec<TextBox>, Vec<LayoutBox>, Orientation);
+type ImageProcessingResult = (
+    Vec<TextBox>,
+    Vec<TextBox>,
+    Vec<LayoutBox>,
+    Orientation,
+    String,
+);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcessMode {
@@ -77,12 +83,13 @@ impl AnalysisPipeline {
                         page.regions = regions;
                     } else {
                         debug!("Processing PDF as image");
-                        let (text_lines, words, layout_boxes, orientation) =
+                        let (text_lines, words, layout_boxes, orientation, language) =
                             self.process_image_document(image)?;
 
                         page.orientation = Some(orientation);
                         page.layout_boxes = layout_boxes.clone();
                         page.text_lines = text_lines.clone();
+                        page.detected_language = Some(language);
                         if !words.is_empty() {
                             page.words = words;
                         }
@@ -106,12 +113,13 @@ impl AnalysisPipeline {
             DocumentType::Png | DocumentType::Jpeg | DocumentType::Tiff => {
                 debug!("Processing image document");
                 if let Some(image) = page.image.as_ref() {
-                    let (text_lines, words, layout_boxes, orientation) =
+                    let (text_lines, words, layout_boxes, orientation, language) =
                         self.process_image_document(image)?;
 
                     page.orientation = Some(orientation);
                     page.layout_boxes = layout_boxes.clone();
                     page.text_lines = text_lines.clone();
+                    page.detected_language = Some(language);
                     if !words.is_empty() {
                         page.words = words;
                     }
@@ -362,11 +370,9 @@ impl AnalysisPipeline {
                 let detection_result =
                     LanguageDetectionTask::detect(&text_lines, &rotated_parts)
                         .map_err(|source| DocumentError::ModelProcessingError { source })?;
-                info!(
-                    "Detected language: {} (confidence: {:.2}, used_lingua: {})",
-                    detection_result.language,
-                    detection_result.confidence,
-                    detection_result.used_lingua
+                debug!(
+                    "Detected language: {} (confidence: {:.2})",
+                    detection_result.language, detection_result.confidence
                 );
                 detection_result.language
             }
@@ -386,7 +392,13 @@ impl AnalysisPipeline {
             self.detect_layout(&oriented_image)?
         };
 
-        Ok((text_lines, words, layout_boxes, document_orientation))
+        Ok((
+            text_lines,
+            words,
+            layout_boxes,
+            document_orientation,
+            language,
+        ))
     }
 
     #[instrument(skip(self, content, questions))]

@@ -22,17 +22,14 @@ pub struct LanguageDetectionResult {
     pub model_file: String,
     /// The confidence score from the OCR model
     pub confidence: f32,
-    /// Whether Lingua was used for disambiguation
-    pub used_lingua: bool,
 }
 
 impl LanguageDetectionResult {
-    pub fn new(language: String, model_file: String, confidence: f32, used_lingua: bool) -> Self {
+    pub fn new(language: String, model_file: String, confidence: f32) -> Self {
         Self {
             language,
             model_file,
             confidence,
-            used_lingua,
         }
     }
 }
@@ -154,6 +151,7 @@ impl LanguageDetectionTask {
 
     fn map_to_lingua_language(language: &str) -> Option<Language> {
         match language.to_lowercase().as_str() {
+            "english" => Some(Language::English),
             "spanish" => Some(Language::Spanish),
             "french" => Some(Language::French),
             "german" => Some(Language::German),
@@ -202,6 +200,7 @@ impl LanguageDetectionTask {
 
     fn map_from_lingua_language(language: Language) -> Option<String> {
         match language {
+            Language::English => Some("english".to_string()),
             Language::Spanish => Some("spanish".to_string()),
             Language::French => Some("french".to_string()),
             Language::German => Some("german".to_string()),
@@ -314,22 +313,22 @@ impl LanguageDetectionTask {
                 message: "All models failed to process the text lines".to_string(),
             })?;
 
-        let (language, used_lingua) = if best_group.languages.len() == 1 {
-            (best_group.languages[0].clone(), false)
-        } else {
-            let detected =
-                Self::detect_language_with_lingua(&recognized_texts, &best_group.languages);
-            match detected {
-                Some(lang) => (lang, true),
-                None => (best_group.languages[0].clone(), false),
-            }
-        };
+        let mut candidate_languages = best_group.languages.clone();
+
+        if !candidate_languages.iter().any(|l| l == "english") {
+            candidate_languages.push("english".to_string());
+        }
+        if !candidate_languages.iter().any(|l| l == "chinese") {
+            candidate_languages.push("chinese".to_string());
+        }
+
+        let language = Self::detect_language_with_lingua(&recognized_texts, &candidate_languages)
+            .unwrap_or_else(|| best_group.languages.first().cloned().unwrap_or_default());
 
         Ok(LanguageDetectionResult::new(
             language,
             best_group.model_file,
             confidence,
-            used_lingua,
         ))
     }
 }

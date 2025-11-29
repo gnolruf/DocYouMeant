@@ -69,7 +69,11 @@ pub fn to_analyze_result(
         result = result.with_content(text);
     }
 
+    let mut detected_language: Option<String> = None;
     for page in content.get_pages() {
+        if detected_language.is_none() && page.detected_language.is_some() {
+            detected_language = page.detected_language.clone();
+        }
         if page.has_regions() {
             result.add_regions(page.regions.clone());
         }
@@ -85,6 +89,10 @@ pub fn to_analyze_result(
         "page_count".to_string(),
         serde_json::json!(content.page_count()),
     );
+
+    if let Some(language) = detected_language {
+        metadata.insert("language".to_string(), serde_json::json!(language));
+    }
 
     result.with_metadata(metadata)
 }
