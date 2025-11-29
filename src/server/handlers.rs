@@ -1,7 +1,7 @@
 use axum::response::Json;
 
 use super::error::AppError;
-use super::models::{AnalyzeRequest, AnalyzeResponse, HealthResponse};
+use super::models::{AnalysisRequest, AnalyzeResponse, HealthResponse};
 use crate::document::Document;
 
 /// Health check endpoint
@@ -11,7 +11,7 @@ pub async fn health() -> Json<HealthResponse> {
 
 /// Main document analysis endpoint
 pub async fn analyze_document(
-    Json(request): Json<AnalyzeRequest>,
+    Json(request): Json<AnalysisRequest>,
 ) -> Result<Json<AnalyzeResponse>, AppError> {
     tracing::info!(
         "Received analysis request for filename: {}",

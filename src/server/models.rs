@@ -13,7 +13,7 @@ const MAX_BASE64_LENGTH: usize = (MAX_FILE_SIZE_BYTES / 3 + 1) * 4;
 const FORBIDDEN_FILENAME_CHARS: &[char] = &['/', '\0'];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AnalyzeRequest {
+pub struct AnalysisRequest {
     /// Base64-encoded document data
     pub data: String,
 
@@ -38,7 +38,7 @@ fn default_process_id() -> String {
     "general".to_string()
 }
 
-impl AnalyzeRequest {
+impl AnalysisRequest {
     pub fn validate_and_decode(&self) -> Result<Vec<u8>, ValidationError> {
         self.validate_filename()?;
         self.validate_and_decode_base64()
