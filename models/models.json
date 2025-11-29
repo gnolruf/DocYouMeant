@@ -38,7 +38,7 @@
     },
     "text_recognition_latin": {
         "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0//latin_PP-OCRv5_mobile_rec_infer.tar",
-        "languages": ["english", "spanish", "french", "german", "italian", "portuguese", "dutch", "turkish", "indonesian", "malay", "vietnamese", "tagalog", "swahili", "swedish", "norwegian", "danish", "finnish", "hungarian", "romanian", "catalan", "basque", "welsh", "irish", "icelandic", "latvian", "lithuanian", "estonian", "maltese", "afrikaans", "zulu", "xhosa", "somali", "hausa", "yoruba", "igbo"],
+        "languages": ["english", "spanish", "french", "german", "italian", "portuguese", "dutch", "turkish", "indonesian", "malay", "vietnamese", "tagalog", "swahili", "swedish", "norwegian", "danish", "finnish", "hungarian", "romanian", "catalan", "basque", "welsh", "irish", "icelandic", "latvian", "lithuanian", "estonian", "maltese", "afrikaans", "zulu", "xhosa", "somali", "hausa", "yoruba", "igbo", "albanian", "azerbaijani", "esperanto", "ganda", "latin", "maori", "shona", "sotho", "tsonga", "tswana", "bokmal", "nynorsk"],
         "is_script_model": true,
         "dir": "latin_PP-OCRv5_mobile_rec_infer",
         "output": "text_recognition_latin.onnx",
@@ -78,7 +78,7 @@
     },
     "text_recognition_arabic": {
         "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/arabic_PP-OCRv5_mobile_rec_infer.tar",
-        "languages": ["arabic"],
+        "languages": ["arabic", "persian"],
         "is_script_model": true,
         "dir": "arabic_PP-OCRv5_mobile_rec_infer",
         "output": "text_recognition_arabic.onnx",
