@@ -6,6 +6,7 @@ use crate::document::error::DocumentError;
 use crate::document::layout_box::LayoutBox;
 use crate::document::region::DocumentRegionBuilder;
 use crate::document::text_box::{Orientation, TextBox};
+use crate::inference::tasks::language_detection_task::LanguageDetectionTask;
 use crate::inference::tasks::question_and_answer_task::QuestionAndAnswerTask;
 use crate::inference::{
     crnn::Crnn, dbnet::DBNet, error::InferenceError, lcnet::LCNet, rtdetr::RtDetr,
@@ -32,11 +33,11 @@ impl From<&str> for ProcessMode {
 pub struct AnalysisPipeline {
     document_type: DocumentType,
     process_mode: ProcessMode,
-    language: String,
+    language: Option<String>,
 }
 
 impl AnalysisPipeline {
-    pub fn new(document_type: DocumentType, process_id: String, language: String) -> Self {
+    pub fn new(document_type: DocumentType, process_id: String, language: Option<String>) -> Self {
         Self {
             document_type,
             process_mode: ProcessMode::from(process_id.as_str()),
@@ -351,7 +352,27 @@ impl AnalysisPipeline {
                 },
             })?;
 
-        let mut text_recognizer = Crnn::new(&self.language)
+        let language = match &self.language {
+            Some(lang) => {
+                debug!("Using provided language: {}", lang);
+                lang.clone()
+            }
+            None => {
+                debug!("No language provided, running language detection");
+                let detection_result =
+                    LanguageDetectionTask::detect(&text_lines, &rotated_parts)
+                        .map_err(|source| DocumentError::ModelProcessingError { source })?;
+                info!(
+                    "Detected language: {} (confidence: {:.2}, used_lingua: {})",
+                    detection_result.language,
+                    detection_result.confidence,
+                    detection_result.used_lingua
+                );
+                detection_result.language
+            }
+        };
+
+        let mut text_recognizer = Crnn::new(&language)
             .map_err(|source| DocumentError::ModelProcessingError { source })?;
 
         let words = text_recognizer

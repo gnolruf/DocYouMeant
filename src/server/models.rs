@@ -19,16 +19,13 @@ pub struct AnalyzeRequest {
     pub process_id: String,
 
     /// The OCR language model to use for text recognition (e.g., "english", "chinese")
-    #[serde(default = "default_language")]
-    pub language: String,
+    /// If not provided, language will be automatically detected
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
 }
 
 fn default_process_id() -> String {
     "general".to_string()
-}
-
-fn default_language() -> String {
-    "english".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

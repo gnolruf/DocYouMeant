@@ -28,7 +28,7 @@ pub async fn analyze_document(
     tracing::info!("Document loaded with type: {:?}", document.doc_type());
 
     let questions = request.questions.as_deref();
-    document.analyze(questions, &request.process_id, &request.language)?;
+    document.analyze(questions, &request.process_id, request.language.as_deref())?;
 
     tracing::info!("Document analysis completed successfully");
 

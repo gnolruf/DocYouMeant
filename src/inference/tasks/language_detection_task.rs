@@ -14,7 +14,6 @@ use crate::utils::lang_utils::LangUtils;
 /// Maximum number of text lines to sample for language detection
 const MAX_SAMPLE_LINES: usize = 3;
 
-/// Result of language detection for a document
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguageDetectionResult {
     /// The detected language name
@@ -38,7 +37,6 @@ impl LanguageDetectionResult {
     }
 }
 
-/// Represents a model group with its associated languages
 #[derive(Debug, Clone)]
 struct ModelGroup {
     model_file: String,
@@ -48,7 +46,6 @@ struct ModelGroup {
 pub struct LanguageDetectionTask;
 
 impl LanguageDetectionTask {
-    /// Builds a mapping of model files to their supported languages (script models only)
     fn build_model_groups() -> Result<HashMap<String, ModelGroup>, InferenceError> {
         let configs = LangUtils::get_all_language_configs(true).map_err(|e| {
             InferenceError::PreprocessingError {
@@ -73,7 +70,6 @@ impl LanguageDetectionTask {
         Ok(model_groups)
     }
 
-    /// Samples up to MAX_SAMPLE_LINES text line images for classification
     fn sample_text_lines<'a>(
         text_boxes: &'a [TextBox],
         part_images: &'a [RgbImage],
@@ -99,7 +95,6 @@ impl LanguageDetectionTask {
             .collect()
     }
 
-    /// Processes text lines with a specific language model and returns the average confidence
     fn process_with_model(
         language: &str,
         samples: &[(&TextBox, &RgbImage)],
@@ -128,7 +123,6 @@ impl LanguageDetectionTask {
         Ok((avg_score, recognized_texts))
     }
 
-    /// Uses Lingua to detect the specific language from a set of candidate languages
     fn detect_language_with_lingua(
         texts: &[String],
         candidate_languages: &[String],
@@ -137,14 +131,12 @@ impl LanguageDetectionTask {
             return None;
         }
 
-        // Map language names to Lingua Language enum
         let lingua_languages: Vec<Language> = candidate_languages
             .iter()
             .filter_map(|lang| Self::map_to_lingua_language(lang))
             .collect();
 
         if lingua_languages.is_empty() {
-            // If no languages could be mapped, return the first candidate
             return candidate_languages.first().cloned();
         }
 
@@ -152,16 +144,14 @@ impl LanguageDetectionTask {
             .with_preloaded_language_models()
             .build();
 
-        // Combine all recognized texts for detection
         let combined_text = texts.join(" ");
 
         detector
             .detect_language_of(&combined_text)
-            .and_then(|detected| Self::map_from_lingua_language(detected))
+            .and_then(Self::map_from_lingua_language)
             .or_else(|| candidate_languages.first().cloned())
     }
 
-    /// Maps our language names to Lingua Language enum
     fn map_to_lingua_language(language: &str) -> Option<Language> {
         match language.to_lowercase().as_str() {
             "spanish" => Some(Language::Spanish),
@@ -210,7 +200,6 @@ impl LanguageDetectionTask {
         }
     }
 
-    /// Maps Lingua Language enum back to our language names
     fn map_from_lingua_language(language: Language) -> Option<String> {
         match language {
             Language::Spanish => Some("spanish".to_string()),
@@ -259,18 +248,6 @@ impl LanguageDetectionTask {
         }
     }
 
-    /// Detects the language of the document based on text line images
-    ///
-    /// This function samples up to 3 text lines and tests them against all available
-    /// script-based OCR models to find the one with the highest confidence score.
-    /// If the best model supports multiple languages, Lingua is used for disambiguation.
-    ///
-    /// # Arguments
-    /// * `text_boxes` - The detected text boxes from the page
-    /// * `part_images` - The corresponding cropped images for each text box
-    ///
-    /// # Returns
-    /// A `LanguageDetectionResult` containing the detected language and confidence
     pub fn detect(
         text_boxes: &[TextBox],
         part_images: &[RgbImage],
@@ -282,7 +259,6 @@ impl LanguageDetectionTask {
             });
         }
 
-        // Build model groups from script models
         let model_groups = Self::build_model_groups()?;
 
         if model_groups.is_empty() {
@@ -292,7 +268,6 @@ impl LanguageDetectionTask {
             });
         }
 
-        // Sample text lines for detection
         let samples = Self::sample_text_lines(text_boxes, part_images);
 
         if samples.is_empty() {
@@ -304,10 +279,7 @@ impl LanguageDetectionTask {
 
         let mut best_result: Option<(f32, ModelGroup, Vec<String>)> = None;
 
-        // Test each model group
         for (_, model_group) in model_groups {
-            // Use the first language in the group to load the model
-            // (they all share the same model file)
             let test_language = model_group.languages.first().ok_or_else(|| {
                 InferenceError::PreprocessingError {
                     operation: "get test language".to_string(),
@@ -327,7 +299,6 @@ impl LanguageDetectionTask {
                     }
                 }
                 Err(e) => {
-                    // Log error but continue with other models
                     tracing::warn!(
                         "Failed to process with model {}: {}",
                         model_group.model_file,
@@ -343,12 +314,9 @@ impl LanguageDetectionTask {
                 message: "All models failed to process the text lines".to_string(),
             })?;
 
-        // Determine the final language
         let (language, used_lingua) = if best_group.languages.len() == 1 {
-            // Single language model - no disambiguation needed
             (best_group.languages[0].clone(), false)
         } else {
-            // Multiple languages share this model - use Lingua for disambiguation
             let detected =
                 Self::detect_language_with_lingua(&recognized_texts, &best_group.languages);
             match detected {
