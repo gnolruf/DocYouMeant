@@ -1,6 +1,10 @@
 use docyoumeant::document::content::DocumentType;
 use docyoumeant::document::{Document, DocumentError};
 
+// ============================================================================
+// Document Creation Tests
+// ============================================================================
+
 #[test]
 fn test_new_document_with_valid_content() {
     let bytes = b"test content\n";
@@ -16,6 +20,10 @@ fn test_new_document_with_invalid_bytes() {
     let result = Document::new(invalid_bytes, "test.docx");
     assert!(result.is_err());
 }
+
+// ============================================================================
+// Document Type Detection Tests
+// ============================================================================
 
 #[test]
 fn test_document_type_detection() {
@@ -56,6 +64,10 @@ fn test_content_access() {
     assert!(doc.content().is_some());
     assert!(doc.content().unwrap().get_text().is_some());
 }
+
+// ============================================================================
+// Extension Handling Tests
+// ============================================================================
 
 #[test]
 fn test_invalid_extension() {

@@ -5,7 +5,10 @@ use std::path::PathBuf;
 use docyoumeant::document::content::{DocumentType, Modality};
 use docyoumeant::document::Document;
 
-// Test helpers
+// ============================================================================
+// Test Helpers
+// ============================================================================
+
 fn fixtures_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
@@ -14,6 +17,10 @@ fn load_fixture(relative_path: &str) -> Vec<u8> {
     let path = fixtures_path().join(relative_path);
     fs::read(&path).unwrap_or_else(|_| panic!("Failed to read fixture: {}", path.display()))
 }
+
+// ============================================================================
+// Document Content Tests
+// ============================================================================
 
 #[test]
 fn test_word_document_content() {
@@ -67,6 +74,10 @@ fn test_jpg_image_content() {
     assert!(HashSet::<Modality>::from(doc.doc_type().clone()).contains(&Modality::Image));
 }
 
+// ============================================================================
+// Text and CSV Content Tests
+// ============================================================================
+
 #[test]
 fn test_text_content_loading() {
     let bytes = b"test content\n";
@@ -108,6 +119,10 @@ fn test_csv_with_multiple_columns() {
 
     assert!(doc.content().unwrap().get_text().is_some());
 }
+
+// ============================================================================
+// Error Handling Tests
+// ============================================================================
 
 #[test]
 fn test_invalid_content() {
@@ -189,6 +204,10 @@ fn test_invalid_image() {
     assert!(result.is_err());
 }
 
+// ============================================================================
+// DocumentType Tests
+// ============================================================================
+
 #[test]
 fn test_document_type_from_extension() {
     assert_eq!(
@@ -245,6 +264,10 @@ fn test_modality_for_all_types() {
     check_modality(DocumentType::Jpeg, vec![Modality::Image]);
     check_modality(DocumentType::Tiff, vec![Modality::Image]);
 }
+
+// ============================================================================
+// PDF Content Tests
+// ============================================================================
 
 #[test]
 fn test_pdf_embedded_text_details() {

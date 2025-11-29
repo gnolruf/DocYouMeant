@@ -22,7 +22,7 @@ pub struct AnalysisResult {
 impl AnalysisResult {
     pub fn new(process_id: &str, content_format: &str) -> Self {
         Self {
-            api_version: "2024-11-30".to_string(),
+            api_version: env!("CARGO_PKG_VERSION").to_string(),
             process_id: process_id.to_string(),
             content_format: content_format.to_string(),
             content: String::new(),
