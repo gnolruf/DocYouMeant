@@ -39,7 +39,7 @@ impl From<&str> for ProcessMode {
 pub struct AnalysisPipeline {
     document_type: DocumentType,
     process_mode: ProcessMode,
-    language: Option<String>,
+    language: std::cell::RefCell<Option<String>>,
 }
 
 impl AnalysisPipeline {
@@ -47,7 +47,7 @@ impl AnalysisPipeline {
         Self {
             document_type,
             process_mode: ProcessMode::from(process_id.as_str()),
-            language,
+            language: std::cell::RefCell::new(language),
         }
     }
 
@@ -275,10 +275,10 @@ impl AnalysisPipeline {
         self.match_embedded_text_to_lines(&mut text_lines, &page.words);
         debug!("Matched embedded text to lines");
 
-        let language = match &self.language {
+        let language = match self.language.borrow().clone() {
             Some(lang) => {
-                debug!("Using provided language: {}", lang);
-                lang.clone()
+                debug!("Using provided/cached language: {}", lang);
+                lang
             }
             None => {
                 debug!("No language provided, running language detection on embedded text");
@@ -290,6 +290,7 @@ impl AnalysisPipeline {
                     "Detected language from embedded text: {}",
                     detection_result.language
                 );
+                *self.language.borrow_mut() = Some(detection_result.language.clone());
                 detection_result.language
             }
         };
@@ -380,10 +381,10 @@ impl AnalysisPipeline {
                 },
             })?;
 
-        let language = match &self.language {
+        let language = match self.language.borrow().clone() {
             Some(lang) => {
-                debug!("Using provided language: {}", lang);
-                lang.clone()
+                debug!("Using provided/cached language: {}", lang);
+                lang
             }
             None => {
                 debug!("No language provided, running language detection");
@@ -394,6 +395,7 @@ impl AnalysisPipeline {
                     "Detected language: {} (confidence: {:.2})",
                     detection_result.language, detection_result.confidence
                 );
+                *self.language.borrow_mut() = Some(detection_result.language.clone());
                 detection_result.language
             }
         };
