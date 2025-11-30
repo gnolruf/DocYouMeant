@@ -46,6 +46,9 @@ pub enum DocumentError {
         #[from]
         source: crate::inference::InferenceError,
     },
+
+    #[error("Processing error: {message}")]
+    ProcessingError { message: String },
 }
 
 impl From<pdfium_render::prelude::PdfiumError> for DocumentError {

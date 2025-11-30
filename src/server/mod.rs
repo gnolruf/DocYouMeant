@@ -13,7 +13,7 @@ use tower_http::trace::TraceLayer;
 use crate::inference::crnn::Crnn;
 use crate::inference::dbnet::DBNet;
 use crate::inference::lcnet::{LCNet, LCNetMode};
-use crate::inference::rtdetr::RtDetr;
+use crate::inference::rtdetr::{RtDetr, RtDetrMode};
 use crate::inference::tasks::question_and_answer_task::QuestionAndAnswerTask;
 
 pub fn create_app() -> Router {
@@ -39,7 +39,7 @@ pub async fn initialize_models(
     LCNet::get_or_init(LCNetMode::TextOrientation)?;
 
     tracing::info!("  Loading RtDetr (layout detection)...");
-    RtDetr::get_or_init()?;
+    RtDetr::get_or_init(RtDetrMode::Layout)?;
 
     tracing::info!("  Loading Phi4Mini (language model)...");
     QuestionAndAnswerTask::get_or_init()?;

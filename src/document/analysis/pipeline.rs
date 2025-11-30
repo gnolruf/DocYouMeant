@@ -13,7 +13,7 @@ use crate::inference::{
     dbnet::DBNet,
     error::InferenceError,
     lcnet::{LCNet, LCNetMode, LCNetResult},
-    rtdetr::RtDetr,
+    rtdetr::{RtDetr, RtDetrMode, RtDetrResult},
 };
 use crate::utils::{box_utils, image_utils};
 
@@ -267,8 +267,16 @@ impl AnalysisPipeline {
 
     fn detect_layout(&self, image: &RgbImage) -> Result<Vec<LayoutBox>, DocumentError> {
         debug!("Starting layout detection");
-        let layout =
-            RtDetr::run(image).map_err(|source| DocumentError::ModelProcessingError { source })?;
+        let result = RtDetr::run(image, RtDetrMode::Layout)
+            .map_err(|source| DocumentError::ModelProcessingError { source })?;
+        let layout = match result {
+            RtDetrResult::LayoutBoxes(boxes) => boxes,
+            _ => {
+                return Err(DocumentError::ProcessingError {
+                    message: "Unexpected result type from layout detection".to_string(),
+                })
+            }
+        };
         debug!("Detected {} layout elements", layout.len());
         Ok(layout)
     }
