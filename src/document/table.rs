@@ -178,14 +178,15 @@ impl Table {
             })
             .collect();
 
-        // Determine row and column structure from cell positions
-        let (row_boundaries, col_boundaries) = Self::compute_grid_boundaries(&cells);
-        let row_count = row_boundaries.len().saturating_sub(1);
-        let column_count = col_boundaries.len().saturating_sub(1);
+        // Determine row and column structure from cell positions using centers
+        let (row_centers, col_centers) = Self::compute_grid_boundaries(&cells);
+        // Row/column count equals the number of unique center positions
+        let row_count = row_centers.len();
+        let column_count = col_centers.len();
 
         // Assign row/column indices and spans to each cell
         for cell in &mut cells {
-            Self::assign_cell_position(cell, &row_boundaries, &col_boundaries);
+            Self::assign_cell_position(cell, &row_centers, &col_centers);
         }
 
         Self {
@@ -202,23 +203,17 @@ impl Table {
     /// Computes the row and column boundaries from cell positions
     /// Returns (row_boundaries, column_boundaries) where boundaries are sorted y/x coordinates
     fn compute_grid_boundaries(cells: &[TableCell]) -> (Vec<i32>, Vec<i32>) {
-        // Collect all unique y boundaries (top and bottom of each cell)
-        let mut y_boundaries: Vec<i32> = cells
-            .iter()
-            .flat_map(|c| vec![c.min_y(), c.max_y()])
-            .collect();
+        // Use cell center points to determine unique rows and columns
+        // This is more robust than using edges which can overlap
+        let mut y_centers: Vec<i32> = cells.iter().map(|c| (c.min_y() + c.max_y()) / 2).collect();
 
-        // Collect all unique x boundaries (left and right of each cell)
-        let mut x_boundaries: Vec<i32> = cells
-            .iter()
-            .flat_map(|c| vec![c.min_x(), c.max_x()])
-            .collect();
+        let mut x_centers: Vec<i32> = cells.iter().map(|c| (c.min_x() + c.max_x()) / 2).collect();
 
-        // Cluster and deduplicate boundaries
-        let row_boundaries = Self::cluster_boundaries(&mut y_boundaries);
-        let col_boundaries = Self::cluster_boundaries(&mut x_boundaries);
+        // Cluster centers to find unique row/column positions
+        let row_centers = Self::cluster_boundaries(&mut y_centers);
+        let col_centers = Self::cluster_boundaries(&mut x_centers);
 
-        (row_boundaries, col_boundaries)
+        (row_centers, col_centers)
     }
 
     /// Clusters nearby boundary values to handle slight misalignments
@@ -252,42 +247,56 @@ impl Table {
         clustered
     }
 
-    /// Assigns row/column index and span to a cell based on grid boundaries
-    fn assign_cell_position(cell: &mut TableCell, row_boundaries: &[i32], col_boundaries: &[i32]) {
-        let cell_min_y = cell.min_y();
-        let cell_max_y = cell.max_y();
-        let cell_min_x = cell.min_x();
-        let cell_max_x = cell.max_x();
+    /// Assigns row/column index and span to a cell based on grid boundaries (row/col centers)
+    fn assign_cell_position(cell: &mut TableCell, row_centers: &[i32], col_centers: &[i32]) {
+        // Use the cell's top-left corner to determine starting row/column index
+        // This ensures cells that span multiple rows/columns get assigned to their
+        // starting position, not a middle position based on center
+        let cell_top = cell.min_y();
+        let cell_left = cell.min_x();
 
-        // Find the row index (which row boundary interval contains the cell top)
-        let row_start = Self::find_boundary_index(cell_min_y, row_boundaries);
-        let row_end = Self::find_boundary_index(cell_max_y, row_boundaries);
+        // Find the closest row center to the cell's top edge (starting row)
+        let row_idx = Self::find_closest_center_index(cell_top, row_centers);
 
-        // Find the column index (which column boundary interval contains the cell left)
-        let col_start = Self::find_boundary_index(cell_min_x, col_boundaries);
-        let col_end = Self::find_boundary_index(cell_max_x, col_boundaries);
+        // Find the closest column center to the cell's left edge (starting column)
+        let col_idx = Self::find_closest_center_index(cell_left, col_centers);
 
-        cell.row_index = row_start;
-        cell.column_index = col_start;
-        cell.row_span = (row_end - row_start).max(1);
-        cell.column_span = (col_end - col_start).max(1);
+        cell.row_index = row_idx;
+        cell.column_index = col_idx;
+
+        // For span calculation, check how many row/column centers fall within the cell bounds
+        cell.row_span = Self::calculate_span(cell.min_y(), cell.max_y(), row_centers);
+        cell.column_span = Self::calculate_span(cell.min_x(), cell.max_x(), col_centers);
     }
 
-    /// Finds which boundary interval a coordinate falls into
-    fn find_boundary_index(coord: i32, boundaries: &[i32]) -> usize {
-        if boundaries.is_empty() {
+    /// Finds the index of the closest center to the given coordinate
+    fn find_closest_center_index(coord: i32, centers: &[i32]) -> usize {
+        if centers.is_empty() {
             return 0;
         }
 
-        // Find the first boundary that is greater than coord
-        for (i, &boundary) in boundaries.iter().enumerate() {
-            if coord < boundary + Self::CLUSTER_TOLERANCE {
-                return if i == 0 { 0 } else { i - 1 };
+        let mut min_dist = i32::MAX;
+        let mut best_idx = 0;
+
+        for (i, &center) in centers.iter().enumerate() {
+            let dist = (coord - center).abs();
+            if dist < min_dist {
+                min_dist = dist;
+                best_idx = i;
             }
         }
 
-        // If coord is beyond all boundaries, return the last interval
-        boundaries.len().saturating_sub(2)
+        best_idx
+    }
+
+    /// Calculates how many centers fall within the given range (for span calculation)
+    fn calculate_span(min_coord: i32, max_coord: i32, centers: &[i32]) -> usize {
+        let tolerance = Self::CLUSTER_TOLERANCE;
+        let count = centers
+            .iter()
+            .filter(|&&c| c >= min_coord - tolerance && c <= max_coord + tolerance)
+            .count();
+        count.max(1)
     }
 
     pub fn match_words_to_cells(&mut self, words: &[TextBox], overlap_threshold: f32) {
