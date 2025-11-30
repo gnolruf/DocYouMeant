@@ -25,7 +25,7 @@
 
 ## Overview
 
-DocYouMeant is a high-performance document understanding API server built with Rust. Utilizing PaddleOCR models via ONNX Runtime, it provides OCR capabilities, layout detection, and document analysis through a RESTful API. The application supports multiple document formats and languages, offering a robust solution for extracting and understanding document content.
+DocYouMeant is a high-performance document understanding API server built with Rust. Via an ONNX Runtime model pipeline, it provides OCR capabilities, layout detection, and document analysis through a RESTful API. Docyoumeant supports multiple document formats and languages, and is configurable depending on what document analysis task it needs to perform.
 
 ## Features
 
@@ -134,16 +134,6 @@ python scripts/client.py tests/fixtures/png/test.png
 python scripts/client.py tests/fixtures/pdf/test.pdf 'What is the document about?'
 ```
 
-**Using curl:**
-```bash
-# Analyze a document
-BASE64_DATA=$(base64 -w 0 tests/fixtures/png/test.png)
-curl -X POST http://127.0.0.1:3000/api/v1/analyze \
-  -H "Content-Type: application/json" \
-  -d "{\"data\":\"$BASE64_DATA\",\"document_type\":\"png\",\"filename\":\"test.png\"}" | jq
-```
-
-
 ## API Reference
 
 ### Endpoints
@@ -161,8 +151,8 @@ curl -X POST http://127.0.0.1:3000/api/v1/analyze \
 ```json
 {
   "data": "base64_encoded_document_data",
-  "document_type": "png|jpg|pdf|docx|xlsx|csv|txt",
   "filename": "document.png",
+  "language": "english",
   "questions": ["optional question 1", "optional question 2"]
 }
 ```
@@ -200,98 +190,6 @@ curl -X POST http://127.0.0.1:3000/api/v1/analyze \
 }
 ```
 
-## Project Structure
-
-```
-├── src/                    # Source code
-│   ├── main.rs            # Application entry point (starts server)
-│   ├── lib.rs             # Library exports
-│   ├── document/          # Document processing modules
-│   │   ├── analysis/      # Document analysis pipeline
-│   │   └── types/         # Document type handlers (PDF, DOCX, etc.)
-│   ├── server/            # API server components
-│   │   ├── handlers.rs    # HTTP request handlers
-│   │   ├── models.rs      # Request/response models
-│   │   └── routes.rs      # Route definitions
-│   ├── inference/         # ML model interfaces
-│   │   ├── dbnet.rs       # Text detection (DBNet)
-│   │   ├── crnn.rs        # Text recognition (CRNN)
-│   │   ├── rtdetr.rs      # Layout detection (RT-DETR)
-│   │   ├── lcnet.rs       # Orientation classification
-│   │   └── phi4mini.rs    # Question answering
-│   └── utils/             # Utility functions
-├── scripts/               # Model management and testing
-│   ├── README.md         # Detailed scripts documentation
-│   ├── download_models.py # Model download and conversion
-│   ├── client.py         # Python API client
-│   └── requirements.txt  # Python dependencies
-├── tests/                 # Test files and fixtures
-│   └── fixtures/         # Test documents (PNG, PDF, DOCX, etc.)
-├── models/               # Downloaded ML models (created by script)
-│   ├── onnx/             # ONNX model files
-│   ├── dict/             # Character dictionaries
-│   ├── lang_models.json  # Language model configuration
-│   └── tokenizer/        # Tokenizer files
-├── .env.example          # Environment configuration template
-├── Dockerfile            # Container configuration
-├── docker-compose.yml    # Development environment
-└── Cargo.toml            # Rust dependencies
-```
-
-## Model Setup
-
-This application requires PaddleOCR models converted to ONNX format.
-
-### Automatic Download & Conversion
-
-The `download_models.py` script handles:
-- Downloading PaddleOCR models from official repositories
-- Converting from PaddlePaddle to ONNX format
-- Extracting dictionaries and configuration files
-- Generating `lang_models.json` configuration
-
-**Download all models:**
-```bash
-cd scripts
-python download_models.py
-```
-
-**Download for specific language:**
-```bash
-python download_models.py --language english
-python download_models.py --language chinese
-```
-
-**Note:** Universal models (text detection, orientation classification, layout detection) are always downloaded regardless of language filter.
-
-### Supported Languages
-
-- English
-- Chinese (Traditional)
-- Extensible to other PaddleOCR-supported languages
-
-### Model Files
-
-After running the script, the following structure is created:
-
-```
-models/
-├── onnx/
-│   ├── text_detection.onnx              # DBNet (universal)
-│   ├── text_orientation_classification.onnx  # LCNet (universal)
-│   ├── document_orientation_classification.onnx
-│   ├── layout_detection.onnx            # RT-DETR (universal)
-│   ├── text_recognition_en.onnx         # English CRNN
-│   ├── text_recognition_ch.onnx         # Chinese CRNN
-│   └── phi-4-mini-instruct/             # Question answering
-├── dict/
-│   ├── en_dict.txt                      # English character set
-│   └── chinese_cht_dict.txt             # Chinese character set
-├── tokenizer/
-│   └── phi-4-mini-instruct/             # Tokenizer configuration
-└── lang_models.json                     # Language model mapping
-```
-
 ## Configuration
 
 ### Environment Variables
@@ -316,93 +214,6 @@ DOCYOUMEANT_ADDR="0.0.0.0:8080" RUST_LOG=debug cargo run --release
 
 # Or using .env file
 cargo run --release
-```
-
-## Troubleshooting
-
-### Server Issues
-
-**Port already in use:**
-```bash
-# Check what's using port 3000
-lsof -i :3000
-
-# Use a different port
-DOCYOUMEANT_ADDR="127.0.0.1:8080" cargo run --release
-```
-
-**Server won't start:**
-- Verify models are downloaded: `ls models/onnx/`
-- Check environment variables: `echo $DOCYOUMEANT_ADDR`
-- Review logs: `RUST_LOG=debug cargo run --release`
-
-### Build Issues
-
-**Dependencies not building:**
-```bash
-# Update dependencies
-cargo update
-
-# Clean and rebuild
-cargo clean && cargo build --release
-```
-
-**ONNX Runtime issues:**
-- Ensure `ort` crate is using dynamic loading
-- Check for ONNX Runtime library in system
-
-### Model Issues
-
-**Models not loading:**
-```bash
-# Re-run model download script
-cd scripts
-python download_models.py
-
-# Verify model files exist
-ls -lh models/onnx/
-cat models/lang_models.json
-```
-
-**Incorrect language detection:**
-- Check `lang_models.json` configuration
-- Verify dictionary files are present in `models/dict/`
-
-### Deployment Example
-
-**Docker Compose (Production):**
-```yaml
-version: '3.8'
-services:
-  docyoumeant:
-    build: .
-    ports:
-      - "3000:3000"
-    environment:
-      - DOCYOUMEANT_ADDR=0.0.0.0:3000
-      - RUST_LOG=docyoumeant=info
-    restart: unless-stopped
-    volumes:
-      - ./models:/app/models:ro
-```
-
-**Systemd Service:**
-```ini
-[Unit]
-Description=DocYouMeant API Server
-After=network.target
-
-[Service]
-Type=simple
-User=docyoumeant
-WorkingDirectory=/opt/docyoumeant
-Environment="DOCYOUMEANT_ADDR=127.0.0.1:3000"
-Environment="RUST_LOG=docyoumeant=info"
-ExecStart=/opt/docyoumeant/docyoumeant
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
 ```
 
 ## Contributing
