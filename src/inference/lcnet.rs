@@ -13,7 +13,6 @@ static TEXT_ORIENTATION_INSTANCE: OnceCell<Mutex<LCNet>> = OnceCell::new();
 static DOCUMENT_ORIENTATION_INSTANCE: OnceCell<Mutex<LCNet>> = OnceCell::new();
 static TABLE_CLASSIFICATION_INSTANCE: OnceCell<Mutex<LCNet>> = OnceCell::new();
 
-/// Defines the mode in which LCNet operates
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LCNetMode {
     /// Classifies the orientation of individual text lines (0° or 180°)
@@ -24,12 +23,9 @@ pub enum LCNetMode {
     TableType,
 }
 
-/// Result type for LCNet inference, containing either orientations or table types
 #[derive(Debug, Clone)]
 pub enum LCNetResult {
-    /// Orientation results for text or document orientation classification
     Orientations(Vec<Orientation>),
-    /// Table type results for table classification
     TableTypes(Vec<TableType>),
 }
 

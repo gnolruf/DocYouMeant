@@ -14,7 +14,6 @@ static LAYOUT_DETECTION_INSTANCE: OnceCell<Mutex<RtDetr>> = OnceCell::new();
 static WIRED_TABLE_CELL_DETECTION_INSTANCE: OnceCell<Mutex<RtDetr>> = OnceCell::new();
 static WIRELESS_TABLE_CELL_DETECTION_INSTANCE: OnceCell<Mutex<RtDetr>> = OnceCell::new();
 
-/// Defines the mode in which RtDetr operates
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RtDetrMode {
     /// Detects layout elements in a document (paragraphs, images, tables, etc.)
@@ -25,12 +24,9 @@ pub enum RtDetrMode {
     WirelessTableCell,
 }
 
-/// Result type for RtDetr inference
 #[derive(Debug, Clone)]
 pub enum RtDetrResult {
-    /// Layout detection results containing detected layout boxes
     LayoutBoxes(Vec<LayoutBox>),
-    /// Table cell detection results containing detected cells
     TableCells(Vec<TableCell>),
 }
 
