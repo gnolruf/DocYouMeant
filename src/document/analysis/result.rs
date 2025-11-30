@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 use crate::document::content::{DocumentContent, DocumentType, PageContent};
 use crate::document::region::DocumentRegion;
+use crate::document::table::Table;
 use crate::inference::tasks::question_and_answer_task::QuestionAndAnswerResult;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,6 +14,8 @@ pub struct AnalysisResult {
     pub content: String,
     pub pages: Vec<PageContent>,
     pub regions: Vec<DocumentRegion>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tables: Vec<Table>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub question_answers: Vec<QuestionAndAnswerResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -28,6 +31,7 @@ impl AnalysisResult {
             content: String::new(),
             pages: Vec::new(),
             regions: Vec::new(),
+            tables: Vec::new(),
             question_answers: Vec::new(),
             metadata: None,
         }
@@ -49,6 +53,10 @@ impl AnalysisResult {
 
     pub fn add_regions(&mut self, mut regions: Vec<DocumentRegion>) {
         self.regions.append(&mut regions);
+    }
+
+    pub fn add_tables(&mut self, mut tables: Vec<Table>) {
+        self.tables.append(&mut tables);
     }
 
     pub fn set_question_answers(&mut self, question_answers: Vec<QuestionAndAnswerResult>) {
@@ -76,6 +84,9 @@ pub fn to_analyze_result(
         }
         if page.has_regions() {
             result.add_regions(page.regions.clone());
+        }
+        if page.has_tables() {
+            result.add_tables(page.tables.clone());
         }
         result.add_page(page.clone());
     }

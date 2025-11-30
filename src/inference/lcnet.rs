@@ -21,7 +21,7 @@ pub enum LCNetMode {
     /// Classifies the orientation of entire documents (0°, 90°, 180°, or 270°)
     DocumentOrientation,
     /// Classifies tables as wired (with borders) or wireless (without borders)
-    TableClassification,
+    TableType,
 }
 
 /// Result type for LCNet inference, containing either orientations or table types
@@ -54,7 +54,7 @@ impl LCNet {
         let model_path = match mode {
             LCNetMode::TextOrientation => Self::TEXT_ORIENTATION_MODEL_PATH,
             LCNetMode::DocumentOrientation => Self::DOCUMENT_ORIENTATION_MODEL_PATH,
-            LCNetMode::TableClassification => Self::TABLE_CLASSIFICATION_MODEL_PATH,
+            LCNetMode::TableType => Self::TABLE_CLASSIFICATION_MODEL_PATH,
         };
 
         let session = Session::builder()
@@ -82,7 +82,7 @@ impl LCNet {
 
         let (dst_height, dst_width) = match mode {
             LCNetMode::TextOrientation => (80, 160),
-            LCNetMode::DocumentOrientation | LCNetMode::TableClassification => (224, 224),
+            LCNetMode::DocumentOrientation | LCNetMode::TableType => (224, 224),
         };
 
         Ok(Self {
@@ -106,10 +106,9 @@ impl LCNet {
                     Self::new(LCNetMode::DocumentOrientation).map(Mutex::new)
                 })?;
             }
-            LCNetMode::TableClassification => {
-                TABLE_CLASSIFICATION_INSTANCE.get_or_try_init(|| {
-                    Self::new(LCNetMode::TableClassification).map(Mutex::new)
-                })?;
+            LCNetMode::TableType => {
+                TABLE_CLASSIFICATION_INSTANCE
+                    .get_or_try_init(|| Self::new(LCNetMode::TableType).map(Mutex::new))?;
             }
         }
         Ok(())
@@ -121,8 +120,8 @@ impl LCNet {
                 .get_or_try_init(|| Self::new(LCNetMode::TextOrientation).map(Mutex::new)),
             LCNetMode::DocumentOrientation => DOCUMENT_ORIENTATION_INSTANCE
                 .get_or_try_init(|| Self::new(LCNetMode::DocumentOrientation).map(Mutex::new)),
-            LCNetMode::TableClassification => TABLE_CLASSIFICATION_INSTANCE
-                .get_or_try_init(|| Self::new(LCNetMode::TableClassification).map(Mutex::new)),
+            LCNetMode::TableType => TABLE_CLASSIFICATION_INSTANCE
+                .get_or_try_init(|| Self::new(LCNetMode::TableType).map(Mutex::new)),
         }
     }
 
@@ -255,7 +254,7 @@ impl LCNet {
                     _ => Ok(Orientation::Oriented0),
                 }
             }
-            LCNetMode::TableClassification => {
+            LCNetMode::TableType => {
                 // This branch should not be reached as run() routes to infer_table_type
                 Ok(Orientation::Oriented0)
             }
@@ -373,7 +372,7 @@ impl LCNet {
     }
 
     fn get_table_types(table_imgs: &[RgbImage]) -> Result<Vec<TableType>, InferenceError> {
-        let instance = Self::instance(LCNetMode::TableClassification)?;
+        let instance = Self::instance(LCNetMode::TableType)?;
         let mut model = instance
             .lock()
             .map_err(|e| InferenceError::ProcessingError {
@@ -455,9 +454,7 @@ impl LCNet {
             LCNetMode::TextOrientation | LCNetMode::DocumentOrientation => Ok(
                 LCNetResult::Orientations(Self::get_angles(imgs, mode, most_angle)?),
             ),
-            LCNetMode::TableClassification => {
-                Ok(LCNetResult::TableTypes(Self::get_table_types(imgs)?))
-            }
+            LCNetMode::TableType => Ok(LCNetResult::TableTypes(Self::get_table_types(imgs)?)),
         }
     }
 }

@@ -336,10 +336,7 @@ impl RtDetr {
             RtDetrMode::WiredTableCell | RtDetrMode::WirelessTableCell => {
                 let table_cells: Vec<TableCell> = filtered_tuples
                     .into_iter()
-                    .map(|(points, _class_id, confidence)| TableCell {
-                        bounds: points,
-                        confidence,
-                    })
+                    .map(|(points, _class_id, confidence)| TableCell::new(points, confidence))
                     .collect();
                 Ok(RtDetrResult::TableCells(table_cells))
             }
