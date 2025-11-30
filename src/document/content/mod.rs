@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::document::layout_box::LayoutBox;
 use crate::document::region::DocumentRegion;
+use crate::document::table::Table;
 use crate::document::text_box::{Orientation, TextBox};
 use crate::inference::tasks::question_and_answer_task::QuestionAndAnswerResult;
 
@@ -116,6 +117,8 @@ pub struct PageContent {
     /// Page regions (used internally for page-level analysis, not serialized in final output)
     #[serde(skip)]
     pub regions: Vec<DocumentRegion>,
+    /// Tables detected on this page
+    pub tables: Vec<Table>,
     /// Raw text content for this page
     pub text: Option<String>,
     /// Document orientation detected for this page
@@ -137,6 +140,7 @@ impl PageContent {
             words: Vec::new(),
             layout_boxes: Vec::new(),
             regions: Vec::new(),
+            tables: Vec::new(),
             text: None,
             orientation: None,
             detected_language: None,
@@ -152,6 +156,7 @@ impl PageContent {
             words: Vec::new(),
             layout_boxes: Vec::new(),
             regions: Vec::new(),
+            tables: Vec::new(),
             text: None,
             orientation: None,
             detected_language: None,
@@ -167,6 +172,7 @@ impl PageContent {
             words: Vec::new(),
             layout_boxes: Vec::new(),
             regions: Vec::new(),
+            tables: Vec::new(),
             text: Some(text),
             orientation: None,
             detected_language: None,
@@ -180,6 +186,10 @@ impl PageContent {
 
     pub fn has_embedded_text_data(&self) -> bool {
         !self.words.is_empty() && self.orientation.is_some()
+    }
+
+    pub fn has_tables(&self) -> bool {
+        !self.tables.is_empty()
     }
 }
 

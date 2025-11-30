@@ -3,6 +3,7 @@ pub mod content;
 pub mod error;
 pub mod layout_box;
 pub mod region;
+pub mod table;
 pub mod text_box;
 
 pub use analysis::{to_analyze_result, AnalysisPipeline, AnalysisResult};

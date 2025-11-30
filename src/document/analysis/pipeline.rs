@@ -3,13 +3,18 @@ use tracing::{debug, info, instrument, warn};
 
 use crate::document::content::{DocumentContent, DocumentType, PageContent};
 use crate::document::error::DocumentError;
-use crate::document::layout_box::LayoutBox;
+use crate::document::layout_box::{LayoutBox, LayoutClass};
 use crate::document::region::DocumentRegionBuilder;
+use crate::document::table::{Table, TableType};
 use crate::document::text_box::{Orientation, TextBox};
 use crate::inference::tasks::language_detection_task::LanguageDetectionTask;
 use crate::inference::tasks::question_and_answer_task::QuestionAndAnswerTask;
 use crate::inference::{
-    crnn::Crnn, dbnet::DBNet, error::InferenceError, lcnet::LCNet, rtdetr::RtDetr,
+    crnn::Crnn,
+    dbnet::DBNet,
+    error::InferenceError,
+    lcnet::{LCNet, LCNetMode, LCNetResult},
+    rtdetr::{RtDetr, RtDetrMode, RtDetrResult},
 };
 use crate::utils::{box_utils, image_utils};
 
@@ -17,6 +22,15 @@ type ImageProcessingResult = (
     Vec<TextBox>,
     Vec<TextBox>,
     Vec<LayoutBox>,
+    Vec<Table>,
+    Orientation,
+    String,
+);
+
+type PdfProcessingResult = (
+    Vec<TextBox>,
+    Vec<LayoutBox>,
+    Vec<Table>,
     Orientation,
     String,
 );
@@ -63,16 +77,17 @@ impl AnalysisPipeline {
         );
         match self.document_type {
             DocumentType::Pdf => {
-                if let Some(image) = page.image.as_ref() {
+                if let Some(image) = page.image.clone() {
                     if page.has_embedded_text_data() {
                         debug!("Processing PDF with embedded text");
-                        let (text_lines, layout_boxes, orientation, language) =
-                            self.process_pdf_with_embedded_text(image, page)?;
+                        let (text_lines, layout_boxes, tables, orientation, language) =
+                            self.process_pdf_with_embedded_text(&image, page)?;
 
                         page.orientation = Some(orientation);
                         page.layout_boxes = layout_boxes.clone();
                         page.text_lines = text_lines.clone();
                         page.detected_language = Some(language);
+                        page.tables = tables;
 
                         self.update_page_text(page);
 
@@ -84,13 +99,14 @@ impl AnalysisPipeline {
                         page.regions = regions;
                     } else {
                         debug!("Processing PDF as image");
-                        let (text_lines, words, layout_boxes, orientation, language) =
-                            self.process_image_document(image)?;
+                        let (text_lines, words, layout_boxes, tables, orientation, language) =
+                            self.process_image_document(&image, page.page_number)?;
 
                         page.orientation = Some(orientation);
                         page.layout_boxes = layout_boxes.clone();
                         page.text_lines = text_lines.clone();
                         page.detected_language = Some(language);
+                        page.tables = tables;
                         if !words.is_empty() {
                             page.words = words;
                         }
@@ -113,14 +129,15 @@ impl AnalysisPipeline {
             }
             DocumentType::Png | DocumentType::Jpeg | DocumentType::Tiff => {
                 debug!("Processing image document");
-                if let Some(image) = page.image.as_ref() {
-                    let (text_lines, words, layout_boxes, orientation, language) =
-                        self.process_image_document(image)?;
+                if let Some(image) = page.image.clone() {
+                    let (text_lines, words, layout_boxes, tables, orientation, language) =
+                        self.process_image_document(&image, page.page_number)?;
 
                     page.orientation = Some(orientation);
                     page.layout_boxes = layout_boxes.clone();
                     page.text_lines = text_lines.clone();
                     page.detected_language = Some(language);
+                    page.tables = tables;
                     if !words.is_empty() {
                         page.words = words;
                     }
@@ -219,8 +236,23 @@ impl AnalysisPipeline {
             return Ok(orientation);
         }
 
-        let orientations = LCNet::get_angles(std::slice::from_ref(image), false, false)
-            .map_err(|source| DocumentError::ModelProcessingError { source })?;
+        let orientations = match LCNet::run(
+            std::slice::from_ref(image),
+            LCNetMode::DocumentOrientation,
+            false,
+        )
+        .map_err(|source| DocumentError::ModelProcessingError { source })?
+        {
+            LCNetResult::Orientations(orientations) => orientations,
+            LCNetResult::TableTypes(_) => {
+                return Err(DocumentError::ModelProcessingError {
+                    source: InferenceError::ProcessingError {
+                        message: "Unexpected table types result for document orientation"
+                            .to_string(),
+                    },
+                });
+            }
+        };
 
         Ok(orientations
             .first()
@@ -248,10 +280,144 @@ impl AnalysisPipeline {
 
     fn detect_layout(&self, image: &RgbImage) -> Result<Vec<LayoutBox>, DocumentError> {
         debug!("Starting layout detection");
-        let layout =
-            RtDetr::run(image).map_err(|source| DocumentError::ModelProcessingError { source })?;
+        let result = RtDetr::run(image, RtDetrMode::Layout)
+            .map_err(|source| DocumentError::ModelProcessingError { source })?;
+        let layout = match result {
+            RtDetrResult::LayoutBoxes(boxes) => boxes,
+            _ => {
+                return Err(DocumentError::ProcessingError {
+                    message: "Unexpected result type from layout detection".to_string(),
+                })
+            }
+        };
         debug!("Detected {} layout elements", layout.len());
         Ok(layout)
+    }
+
+    #[instrument(skip(self, image, layout_boxes))]
+    fn detect_tables(
+        &self,
+        image: &RgbImage,
+        layout_boxes: &[LayoutBox],
+        page_number: usize,
+    ) -> Result<Vec<Table>, DocumentError> {
+        debug!("Starting table detection");
+
+        // Filter layout boxes to only include tables
+        let table_boxes: Vec<&LayoutBox> = layout_boxes
+            .iter()
+            .filter(|lb| lb.class == LayoutClass::Table)
+            .collect();
+
+        if table_boxes.is_empty() {
+            debug!("No table regions found in layout");
+            return Ok(Vec::new());
+        }
+
+        debug!("Found {} table regions in layout", table_boxes.len());
+
+        let mut table_images = Vec::with_capacity(table_boxes.len());
+        for table_box in &table_boxes {
+            let box_points: Vec<(i32, i32)> = table_box.bounds.iter().map(|p| (p.x, p.y)).collect();
+
+            let (table_image, _) =
+                image_utils::get_rotate_crop_image(image, &box_points).map_err(|e| {
+                    DocumentError::ProcessingError {
+                        message: format!("Failed to crop table image: {}", e),
+                    }
+                })?;
+
+            table_images.push(table_image);
+        }
+
+        let table_types = self.classify_table_types(&table_images)?;
+
+        let mut tables = Vec::with_capacity(table_boxes.len());
+        for (i, ((table_box, table_image), table_type)) in table_boxes
+            .iter()
+            .zip(table_images.iter())
+            .zip(table_types.iter())
+            .enumerate()
+        {
+            debug!("Processing table {} of type {:?}", i + 1, table_type);
+
+            match self.detect_table_cells(table_image, table_box, *table_type, page_number) {
+                Ok(table) => {
+                    debug!(
+                        "Detected table with {} rows, {} columns, {} cells",
+                        table.row_count,
+                        table.column_count,
+                        table.cells.len()
+                    );
+                    tables.push(table);
+                }
+                Err(e) => {
+                    warn!("Failed to detect cells for table {}: {}", i + 1, e);
+                    tables.push(Table::from_cells(
+                        Vec::new(),
+                        table_box.bounds,
+                        *table_type,
+                        page_number,
+                        table_box.confidence,
+                    ));
+                }
+            }
+        }
+
+        debug!("Completed table detection, found {} tables", tables.len());
+        Ok(tables)
+    }
+
+    fn classify_table_types(
+        &self,
+        table_images: &[RgbImage],
+    ) -> Result<Vec<TableType>, DocumentError> {
+        if table_images.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let result = LCNet::run(table_images, LCNetMode::TableType, false)
+            .map_err(|source| DocumentError::ModelProcessingError { source })?;
+
+        match result {
+            LCNetResult::TableTypes(types) => Ok(types),
+            LCNetResult::Orientations(_) => Err(DocumentError::ProcessingError {
+                message: "Unexpected orientations result for table classification".to_string(),
+            }),
+        }
+    }
+
+    fn detect_table_cells(
+        &self,
+        table_image: &RgbImage,
+        table_box: &LayoutBox,
+        table_type: TableType,
+        page_number: usize,
+    ) -> Result<Table, DocumentError> {
+        let detection_mode = match table_type {
+            TableType::Wired => RtDetrMode::WiredTableCell,
+            TableType::Wireless => RtDetrMode::WirelessTableCell,
+        };
+
+        let result = RtDetr::run(table_image, detection_mode)
+            .map_err(|source| DocumentError::ModelProcessingError { source })?;
+
+        let detected_cells = match result {
+            RtDetrResult::TableCells(cells) => cells,
+            RtDetrResult::LayoutBoxes(_) => {
+                return Err(DocumentError::ProcessingError {
+                    message: "Unexpected layout boxes result for table cell detection".to_string(),
+                });
+            }
+        };
+
+        Ok(Table::from_cells(
+            detected_cells,
+            table_box.bounds,
+            table_type,
+            page_number,
+            table_box.confidence,
+        ))
     }
 
     #[instrument(skip(self, image, page))]
@@ -259,7 +425,7 @@ impl AnalysisPipeline {
         &self,
         image: &RgbImage,
         page: &PageContent,
-    ) -> Result<(Vec<TextBox>, Vec<LayoutBox>, Orientation, String), DocumentError> {
+    ) -> Result<PdfProcessingResult, DocumentError> {
         let document_orientation = self.get_document_orientation(image, page.orientation)?;
         debug!("Document orientation: {:?}", document_orientation);
 
@@ -296,13 +462,25 @@ impl AnalysisPipeline {
             }
         };
 
-        let layout_boxes = if self.process_mode == ProcessMode::Read {
-            Vec::new()
+        let (layout_boxes, mut tables) = if self.process_mode == ProcessMode::Read {
+            (Vec::new(), Vec::new())
         } else {
-            self.detect_layout(&oriented_image)?
+            let layout = self.detect_layout(&oriented_image)?;
+            let tables = self.detect_tables(&oriented_image, &layout, page.page_number)?;
+            (layout, tables)
         };
 
-        Ok((text_lines, layout_boxes, document_orientation, language))
+        for table in &mut tables {
+            table.match_words_to_cells(&page.words, 0.5);
+        }
+
+        Ok((
+            text_lines,
+            layout_boxes,
+            tables,
+            document_orientation,
+            language,
+        ))
     }
 
     fn match_embedded_text_to_lines(&self, text_lines: &mut [TextBox], embedded_words: &[TextBox]) {
@@ -344,6 +522,7 @@ impl AnalysisPipeline {
     fn process_image_document(
         &self,
         image: &RgbImage,
+        page_number: usize,
     ) -> Result<ImageProcessingResult, DocumentError> {
         let document_orientation = self.get_document_orientation(image, None)?;
         debug!("Document orientation: {:?}", document_orientation);
@@ -366,8 +545,18 @@ impl AnalysisPipeline {
                 }
             })?;
 
-        let angles = LCNet::run(&image_parts, true)
-            .map_err(|source| DocumentError::ModelProcessingError { source })?;
+        let angles = match LCNet::run(&image_parts, LCNetMode::TextOrientation, true)
+            .map_err(|source| DocumentError::ModelProcessingError { source })?
+        {
+            LCNetResult::Orientations(orientations) => orientations,
+            LCNetResult::TableTypes(_) => {
+                return Err(DocumentError::ModelProcessingError {
+                    source: InferenceError::ProcessingError {
+                        message: "Unexpected table types result for text orientation".to_string(),
+                    },
+                });
+            }
+        };
 
         for (i, angle) in angles.iter().enumerate() {
             if i < text_lines.len() {
@@ -410,16 +599,23 @@ impl AnalysisPipeline {
             .map_err(|source| DocumentError::ModelProcessingError { source })?;
         debug!("Recognized text for {} lines", words.len());
 
-        let layout_boxes = if self.process_mode == ProcessMode::Read {
-            Vec::new()
+        let (layout_boxes, mut tables) = if self.process_mode == ProcessMode::Read {
+            (Vec::new(), Vec::new())
         } else {
-            self.detect_layout(&oriented_image)?
+            let layout = self.detect_layout(&oriented_image)?;
+            let tables = self.detect_tables(&oriented_image, &layout, page_number)?;
+            (layout, tables)
         };
+
+        for table in &mut tables {
+            table.match_words_to_cells(&words, 0.5);
+        }
 
         Ok((
             text_lines,
             words,
             layout_boxes,
+            tables,
             document_orientation,
             language,
         ))

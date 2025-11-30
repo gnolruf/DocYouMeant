@@ -5,11 +5,30 @@ use once_cell::sync::OnceCell;
 use ort::{inputs, session::Session, value::Value};
 use std::sync::Mutex;
 
+use crate::document::table::TableCell;
 use crate::document::{LayoutBox, LayoutClass};
 use crate::inference::error::InferenceError;
 use crate::utils::{box_utils, image_utils};
 
-static RTDETR_INSTANCE: OnceCell<Mutex<RtDetr>> = OnceCell::new();
+static LAYOUT_DETECTION_INSTANCE: OnceCell<Mutex<RtDetr>> = OnceCell::new();
+static WIRED_TABLE_CELL_DETECTION_INSTANCE: OnceCell<Mutex<RtDetr>> = OnceCell::new();
+static WIRELESS_TABLE_CELL_DETECTION_INSTANCE: OnceCell<Mutex<RtDetr>> = OnceCell::new();
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RtDetrMode {
+    /// Detects layout elements in a document (paragraphs, images, tables, etc.)
+    Layout,
+    /// Detects cells in a table with visible grid lines/borders
+    WiredTableCell,
+    /// Detects cells in a table without visible grid lines/borders
+    WirelessTableCell,
+}
+
+#[derive(Debug, Clone)]
+pub enum RtDetrResult {
+    LayoutBoxes(Vec<LayoutBox>),
+    TableCells(Vec<TableCell>),
+}
 
 pub struct RtDetr {
     session: Session,
@@ -22,16 +41,27 @@ pub struct RtDetr {
     nms_threshold: f32,
     scale_x: f32,
     scale_y: f32,
+    mode: RtDetrMode,
 }
 
 impl RtDetr {
-    const MODEL_PATH: &'static str = "models/onnx/layout_detection.onnx";
+    const LAYOUT_DETECTION_MODEL_PATH: &'static str = "models/onnx/layout_detection.onnx";
+    const WIRED_TABLE_CELL_DETECTION_MODEL_PATH: &'static str =
+        "models/onnx/wired_table_cell_detection.onnx";
+    const WIRELESS_TABLE_CELL_DETECTION_MODEL_PATH: &'static str =
+        "models/onnx/wireless_table_cell_detection.onnx";
     const NUM_THREADS: usize = 4;
 
-    pub fn new() -> Result<Self, InferenceError> {
+    pub fn new(mode: RtDetrMode) -> Result<Self, InferenceError> {
+        let model_path = match mode {
+            RtDetrMode::Layout => Self::LAYOUT_DETECTION_MODEL_PATH,
+            RtDetrMode::WiredTableCell => Self::WIRED_TABLE_CELL_DETECTION_MODEL_PATH,
+            RtDetrMode::WirelessTableCell => Self::WIRELESS_TABLE_CELL_DETECTION_MODEL_PATH,
+        };
+
         let session = Session::builder()
             .map_err(|source| InferenceError::ModelFileLoadError {
-                path: Self::MODEL_PATH.into(),
+                path: model_path.into(),
                 source,
             })?
             .with_execution_providers([
@@ -46,11 +76,16 @@ impl RtDetr {
                     .build(),
             ])?
             .with_inter_threads(Self::NUM_THREADS)?
-            .commit_from_file(Self::MODEL_PATH)
+            .commit_from_file(model_path)
             .map_err(|source| InferenceError::ModelFileLoadError {
-                path: Self::MODEL_PATH.into(),
+                path: model_path.into(),
                 source,
             })?;
+
+        let input_size = match mode {
+            RtDetrMode::Layout => 800,
+            RtDetrMode::WiredTableCell | RtDetrMode::WirelessTableCell => 640,
+        };
 
         Ok(Self {
             session,
@@ -62,21 +97,42 @@ impl RtDetr {
             ],
             src_height: 0,
             src_width: 0,
-            input_size: 800,
+            input_size,
             conf_threshold: 0.5,
             nms_threshold: 0.4,
             scale_x: 1.0,
             scale_y: 1.0,
+            mode,
         })
     }
 
-    pub fn get_or_init() -> Result<(), InferenceError> {
-        RTDETR_INSTANCE.get_or_try_init(|| Self::new().map(Mutex::new))?;
+    pub fn get_or_init(mode: RtDetrMode) -> Result<(), InferenceError> {
+        match mode {
+            RtDetrMode::Layout => {
+                LAYOUT_DETECTION_INSTANCE
+                    .get_or_try_init(|| Self::new(RtDetrMode::Layout).map(Mutex::new))?;
+            }
+            RtDetrMode::WiredTableCell => {
+                WIRED_TABLE_CELL_DETECTION_INSTANCE
+                    .get_or_try_init(|| Self::new(RtDetrMode::WiredTableCell).map(Mutex::new))?;
+            }
+            RtDetrMode::WirelessTableCell => {
+                WIRELESS_TABLE_CELL_DETECTION_INSTANCE
+                    .get_or_try_init(|| Self::new(RtDetrMode::WirelessTableCell).map(Mutex::new))?;
+            }
+        }
         Ok(())
     }
 
-    fn instance() -> Result<&'static Mutex<RtDetr>, InferenceError> {
-        RTDETR_INSTANCE.get_or_try_init(|| Self::new().map(Mutex::new))
+    fn instance(mode: RtDetrMode) -> Result<&'static Mutex<RtDetr>, InferenceError> {
+        match mode {
+            RtDetrMode::Layout => LAYOUT_DETECTION_INSTANCE
+                .get_or_try_init(|| Self::new(RtDetrMode::Layout).map(Mutex::new)),
+            RtDetrMode::WiredTableCell => WIRED_TABLE_CELL_DETECTION_INSTANCE
+                .get_or_try_init(|| Self::new(RtDetrMode::WiredTableCell).map(Mutex::new)),
+            RtDetrMode::WirelessTableCell => WIRELESS_TABLE_CELL_DETECTION_INSTANCE
+                .get_or_try_init(|| Self::new(RtDetrMode::WirelessTableCell).map(Mutex::new)),
+        }
     }
 
     pub fn preprocess(&mut self, image: &RgbImage) -> Result<RgbImage, InferenceError> {
@@ -158,7 +214,7 @@ impl RtDetr {
         ))
     }
 
-    pub fn detect(&mut self, image: &RgbImage) -> Result<Vec<LayoutBox>, InferenceError> {
+    fn detect(&mut self, image: &RgbImage) -> Result<RtDetrResult, InferenceError> {
         let (image_input, im_shape_input, scale_factor_input) = self.create_model_inputs(image)?;
 
         let (bbox_data, num_detections) = {
@@ -220,7 +276,14 @@ impl RtDetr {
                 continue;
             }
 
-            if LayoutClass::from_id(class_id).is_some() {
+            // For table cell detection, class_id is always 0 (cell)
+            // For layout detection, validate the class_id
+            let is_valid_class = match self.mode {
+                RtDetrMode::Layout => LayoutClass::from_id(class_id).is_some(),
+                RtDetrMode::WiredTableCell | RtDetrMode::WirelessTableCell => class_id == 0,
+            };
+
+            if is_valid_class {
                 let orig_x1 = (x1 * self.scale_x).round() as i32;
                 let orig_y1 = (y1 * self.scale_y).round() as i32;
                 let orig_x2 = (x2 * self.scale_x).round() as i32;
@@ -252,22 +315,32 @@ impl RtDetr {
 
         let filtered_tuples = box_utils::apply_nms(detection_tuples, self.nms_threshold);
 
-        let filtered_detections: Vec<LayoutBox> = filtered_tuples
-            .into_iter()
-            .filter_map(|(points, class_id, confidence)| {
-                LayoutClass::from_id(class_id).map(|class| LayoutBox {
-                    bounds: points,
-                    class,
-                    confidence,
-                })
-            })
-            .collect();
-
-        Ok(filtered_detections)
+        match self.mode {
+            RtDetrMode::Layout => {
+                let filtered_detections: Vec<LayoutBox> = filtered_tuples
+                    .into_iter()
+                    .filter_map(|(points, class_id, confidence)| {
+                        LayoutClass::from_id(class_id).map(|class| LayoutBox {
+                            bounds: points,
+                            class,
+                            confidence,
+                        })
+                    })
+                    .collect();
+                Ok(RtDetrResult::LayoutBoxes(filtered_detections))
+            }
+            RtDetrMode::WiredTableCell | RtDetrMode::WirelessTableCell => {
+                let table_cells: Vec<TableCell> = filtered_tuples
+                    .into_iter()
+                    .map(|(points, _class_id, confidence)| TableCell::new(points, confidence))
+                    .collect();
+                Ok(RtDetrResult::TableCells(table_cells))
+            }
+        }
     }
 
-    pub fn run(image: &RgbImage) -> Result<Vec<LayoutBox>, InferenceError> {
-        let instance = Self::instance()?;
+    pub fn run(image: &RgbImage, mode: RtDetrMode) -> Result<RtDetrResult, InferenceError> {
+        let instance = Self::instance(mode)?;
         let mut model = instance
             .lock()
             .map_err(|e| InferenceError::ProcessingError {

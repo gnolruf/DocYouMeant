@@ -4,12 +4,30 @@ use once_cell::sync::OnceCell;
 use ort::{inputs, session::Session, value::Value};
 use std::sync::Mutex;
 
+use crate::document::table::TableType;
 use crate::document::text_box::Orientation;
 use crate::inference::error::InferenceError;
 use crate::utils::image_utils;
 
 static TEXT_ORIENTATION_INSTANCE: OnceCell<Mutex<LCNet>> = OnceCell::new();
 static DOCUMENT_ORIENTATION_INSTANCE: OnceCell<Mutex<LCNet>> = OnceCell::new();
+static TABLE_CLASSIFICATION_INSTANCE: OnceCell<Mutex<LCNet>> = OnceCell::new();
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LCNetMode {
+    /// Classifies the orientation of individual text lines (0° or 180°)
+    TextOrientation,
+    /// Classifies the orientation of entire documents (0°, 90°, 180°, or 270°)
+    DocumentOrientation,
+    /// Classifies tables as wired (with borders) or wireless (without borders)
+    TableType,
+}
+
+#[derive(Debug, Clone)]
+pub enum LCNetResult {
+    Orientations(Vec<Orientation>),
+    TableTypes(Vec<TableType>),
+}
 
 pub struct LCNet {
     session: Session,
@@ -17,7 +35,7 @@ pub struct LCNet {
     norm_values: [f32; 3],
     dst_height: u32,
     dst_width: u32,
-    is_text_orientation: bool,
+    mode: LCNetMode,
 }
 
 impl LCNet {
@@ -25,13 +43,14 @@ impl LCNet {
         "models/onnx/text_orientation_classification.onnx";
     const DOCUMENT_ORIENTATION_MODEL_PATH: &'static str =
         "models/onnx/document_orientation_classification.onnx";
+    const TABLE_CLASSIFICATION_MODEL_PATH: &'static str = "models/onnx/table_classification.onnx";
     const NUM_THREADS: usize = 4;
 
-    pub fn new(is_text_orientation: bool) -> Result<Self, InferenceError> {
-        let model_path = if is_text_orientation {
-            Self::TEXT_ORIENTATION_MODEL_PATH
-        } else {
-            Self::DOCUMENT_ORIENTATION_MODEL_PATH
+    pub fn new(mode: LCNetMode) -> Result<Self, InferenceError> {
+        let model_path = match mode {
+            LCNetMode::TextOrientation => Self::TEXT_ORIENTATION_MODEL_PATH,
+            LCNetMode::DocumentOrientation => Self::DOCUMENT_ORIENTATION_MODEL_PATH,
+            LCNetMode::TableType => Self::TABLE_CLASSIFICATION_MODEL_PATH,
         };
 
         let session = Session::builder()
@@ -57,10 +76,9 @@ impl LCNet {
                 source,
             })?;
 
-        let (dst_height, dst_width) = if is_text_orientation {
-            (80, 160) // Text orientation dimensions
-        } else {
-            (224, 224) // Document orientation dimensions
+        let (dst_height, dst_width) = match mode {
+            LCNetMode::TextOrientation => (80, 160),
+            LCNetMode::DocumentOrientation | LCNetMode::TableType => (224, 224),
         };
 
         Ok(Self {
@@ -69,24 +87,37 @@ impl LCNet {
             norm_values: [1.0 / 127.5, 1.0 / 127.5, 1.0 / 127.5],
             dst_height,
             dst_width,
-            is_text_orientation,
+            mode,
         })
     }
 
-    pub fn get_or_init(is_text_orientation: bool) -> Result<(), InferenceError> {
-        if is_text_orientation {
-            TEXT_ORIENTATION_INSTANCE.get_or_try_init(|| Self::new(true).map(Mutex::new))?;
-        } else {
-            DOCUMENT_ORIENTATION_INSTANCE.get_or_try_init(|| Self::new(false).map(Mutex::new))?;
+    pub fn get_or_init(mode: LCNetMode) -> Result<(), InferenceError> {
+        match mode {
+            LCNetMode::TextOrientation => {
+                TEXT_ORIENTATION_INSTANCE
+                    .get_or_try_init(|| Self::new(LCNetMode::TextOrientation).map(Mutex::new))?;
+            }
+            LCNetMode::DocumentOrientation => {
+                DOCUMENT_ORIENTATION_INSTANCE.get_or_try_init(|| {
+                    Self::new(LCNetMode::DocumentOrientation).map(Mutex::new)
+                })?;
+            }
+            LCNetMode::TableType => {
+                TABLE_CLASSIFICATION_INSTANCE
+                    .get_or_try_init(|| Self::new(LCNetMode::TableType).map(Mutex::new))?;
+            }
         }
         Ok(())
     }
 
-    fn instance(is_text_orientation: bool) -> Result<&'static Mutex<LCNet>, InferenceError> {
-        if is_text_orientation {
-            TEXT_ORIENTATION_INSTANCE.get_or_try_init(|| Self::new(true).map(Mutex::new))
-        } else {
-            DOCUMENT_ORIENTATION_INSTANCE.get_or_try_init(|| Self::new(false).map(Mutex::new))
+    fn instance(mode: LCNetMode) -> Result<&'static Mutex<LCNet>, InferenceError> {
+        match mode {
+            LCNetMode::TextOrientation => TEXT_ORIENTATION_INSTANCE
+                .get_or_try_init(|| Self::new(LCNetMode::TextOrientation).map(Mutex::new)),
+            LCNetMode::DocumentOrientation => DOCUMENT_ORIENTATION_INSTANCE
+                .get_or_try_init(|| Self::new(LCNetMode::DocumentOrientation).map(Mutex::new)),
+            LCNetMode::TableType => TABLE_CLASSIFICATION_INSTANCE
+                .get_or_try_init(|| Self::new(LCNetMode::TableType).map(Mutex::new)),
         }
     }
 
@@ -131,7 +162,7 @@ impl LCNet {
         Ok(())
     }
 
-    pub fn infer_angle(
+    fn infer_angle(
         &mut self,
         src: &RgbImage,
         is_vertical: bool,
@@ -174,57 +205,114 @@ impl LCNet {
 
         let output_data = output.1;
 
-        if self.is_text_orientation {
-            // Text orientation: 2-class output (0 vs 180 degrees)
-            let score_0 = output_data[0];
-            let score_1 = output_data[1];
+        match self.mode {
+            LCNetMode::TextOrientation => {
+                // Text orientation: 2-class output (0 vs 180 degrees)
+                let score_0 = output_data[0];
+                let score_1 = output_data[1];
 
-            let base_angle = if score_0 > score_1 {
-                Orientation::Oriented0
-            } else {
-                Orientation::Oriented180
-            };
+                let base_angle = if score_0 > score_1 {
+                    Orientation::Oriented0
+                } else {
+                    Orientation::Oriented180
+                };
 
-            if is_vertical {
-                match base_angle {
-                    Orientation::Oriented0 => Ok(Orientation::Oriented90),
-                    Orientation::Oriented180 => Ok(Orientation::Oriented270),
-                    _ => Ok(Orientation::Oriented90),
+                if is_vertical {
+                    match base_angle {
+                        Orientation::Oriented0 => Ok(Orientation::Oriented90),
+                        Orientation::Oriented180 => Ok(Orientation::Oriented270),
+                        _ => Ok(Orientation::Oriented90),
+                    }
+                } else {
+                    Ok(base_angle)
                 }
-            } else {
-                Ok(base_angle)
             }
-        } else {
-            // Document orientation: 4-class output (0, 90, 180, 270 degrees)
-            let score_0 = output_data[0];
-            let score_90 = output_data[1];
-            let score_180 = output_data[2];
-            let score_270 = output_data[3];
+            LCNetMode::DocumentOrientation => {
+                // Document orientation: 4-class output (0, 90, 180, 270 degrees)
+                let score_0 = output_data[0];
+                let score_90 = output_data[1];
+                let score_180 = output_data[2];
+                let score_270 = output_data[3];
 
-            let scores = [score_0, score_90, score_180, score_270];
-            let max_index = scores
-                .iter()
-                .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                .map(|(index, _)| index)
-                .unwrap_or(0);
+                let scores = [score_0, score_90, score_180, score_270];
+                let max_index = scores
+                    .iter()
+                    .enumerate()
+                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                    .map(|(index, _)| index)
+                    .unwrap_or(0);
 
-            match max_index {
-                0 => Ok(Orientation::Oriented0),
-                1 => Ok(Orientation::Oriented90),
-                2 => Ok(Orientation::Oriented180),
-                3 => Ok(Orientation::Oriented270),
-                _ => Ok(Orientation::Oriented0),
+                match max_index {
+                    0 => Ok(Orientation::Oriented0),
+                    1 => Ok(Orientation::Oriented90),
+                    2 => Ok(Orientation::Oriented180),
+                    3 => Ok(Orientation::Oriented270),
+                    _ => Ok(Orientation::Oriented0),
+                }
+            }
+            LCNetMode::TableType => {
+                // This branch should not be reached as run() routes to infer_table_type
+                Ok(Orientation::Oriented0)
             }
         }
     }
 
-    pub fn get_angles(
+    fn infer_table_type(&mut self, src: &RgbImage) -> Result<TableType, InferenceError> {
+        let input_array =
+            image_utils::subtract_mean_normalize(src, &self.mean_values, &self.norm_values)
+                .map_err(|e| InferenceError::PreprocessingError {
+                    operation: "normalize image".to_string(),
+                    message: e.to_string(),
+                })?;
+
+        let shape = input_array.shape().to_vec();
+        let (data, _offset) = input_array.into_raw_vec_and_offset();
+        let input_value = Value::from_array((shape.as_slice(), data)).map_err(|e| {
+            InferenceError::PreprocessingError {
+                operation: "create input value".to_string(),
+                message: e.to_string(),
+            }
+        })?;
+
+        let outputs = self.session.run(inputs!["x" => input_value]).map_err(|e| {
+            println!("Error running the session: {e:?}");
+            InferenceError::ModelExecutionError {
+                operation: "TableClassification forward pass".to_string(),
+                source: e,
+            }
+        })?;
+
+        let output = outputs
+            .get("fetch_name_0")
+            .ok_or_else(|| InferenceError::PredictionError {
+                operation: "get model outputs".to_string(),
+                message: "Output 'fetch_name_0' not found".to_string(),
+            })?
+            .try_extract_tensor::<f32>()
+            .map_err(|source| InferenceError::PredictionError {
+                operation: "extract output tensor".to_string(),
+                message: source.to_string(),
+            })?;
+
+        let output_data = output.1;
+
+        // Table classification: 2-class output (wired vs wireless)
+        let score_wired = output_data[0];
+        let score_wireless = output_data[1];
+
+        if score_wired > score_wireless {
+            Ok(TableType::Wired)
+        } else {
+            Ok(TableType::Wireless)
+        }
+    }
+
+    fn get_angles(
         part_imgs: &[RgbImage],
-        is_text_orientation: bool,
+        mode: LCNetMode,
         most_angle: bool,
     ) -> Result<Vec<Orientation>, InferenceError> {
-        let instance = Self::instance(is_text_orientation)?;
+        let instance = Self::instance(mode)?;
         let mut model = instance
             .lock()
             .map_err(|e| InferenceError::ProcessingError {
@@ -279,10 +367,60 @@ impl LCNet {
         Ok(angles)
     }
 
-    pub fn preprocess(&self, src: &RgbImage) -> Result<(RgbImage, bool), InferenceError> {
+    fn get_table_types(table_imgs: &[RgbImage]) -> Result<Vec<TableType>, InferenceError> {
+        let instance = Self::instance(LCNetMode::TableType)?;
+        let mut model = instance
+            .lock()
+            .map_err(|e| InferenceError::ProcessingError {
+                message: format!("Failed to lock LCNet instance: {e}"),
+            })?;
+        let size = table_imgs.len();
+        let mut table_types = Vec::with_capacity(size);
+
+        for (i, table_img) in table_imgs.iter().enumerate() {
+            if table_img.width() == 0 || table_img.height() == 0 {
+                println!("Warning: Empty table image at index {i}, skipping");
+                table_types.push(TableType::Wired); // Default to wired
+                continue;
+            }
+
+            if table_img.width() < 2 || table_img.height() < 2 {
+                println!(
+                    "Warning: Table image at index {} is too small ({}x{}), skipping",
+                    i,
+                    table_img.width(),
+                    table_img.height()
+                );
+                table_types.push(TableType::Wired); // Default to wired
+                continue;
+            }
+
+            let table_type = match model.preprocess(table_img) {
+                Ok((resized_img, _)) => match model.infer_table_type(&resized_img) {
+                    Ok(result) => result,
+                    Err(e) => {
+                        println!("Error inferring table type for image {i}: {e:?}");
+                        table_types.push(TableType::Wired);
+                        continue;
+                    }
+                },
+                Err(e) => {
+                    println!("Error preprocessing table image {i}: {e:?}");
+                    table_types.push(TableType::Wired);
+                    continue;
+                }
+            };
+
+            table_types.push(table_type);
+        }
+
+        Ok(table_types)
+    }
+
+    fn preprocess(&self, src: &RgbImage) -> Result<(RgbImage, bool), InferenceError> {
         let is_vertical = (src.height() as f32) >= (src.width() as f32) * 1.5;
 
-        let processed_img = if self.is_text_orientation && is_vertical {
+        let processed_img = if self.mode == LCNetMode::TextOrientation && is_vertical {
             rotate_about_center(
                 src,
                 -std::f32::consts::PI / 2.0,
@@ -304,9 +442,15 @@ impl LCNet {
     }
 
     pub fn run(
-        part_imgs: &[RgbImage],
-        is_text_orientation: bool,
-    ) -> Result<Vec<Orientation>, InferenceError> {
-        Self::get_angles(part_imgs, is_text_orientation, true)
+        imgs: &[RgbImage],
+        mode: LCNetMode,
+        most_angle: bool,
+    ) -> Result<LCNetResult, InferenceError> {
+        match mode {
+            LCNetMode::TextOrientation | LCNetMode::DocumentOrientation => Ok(
+                LCNetResult::Orientations(Self::get_angles(imgs, mode, most_angle)?),
+            ),
+            LCNetMode::TableType => Ok(LCNetResult::TableTypes(Self::get_table_types(imgs)?)),
+        }
     }
 }
