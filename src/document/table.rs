@@ -12,7 +12,6 @@ pub enum TableType {
     Wireless,
 }
 
-/// Represents a detected cell within a table
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableCell {
     /// The bounding box of the cell as 4 corner coordinates
@@ -33,7 +32,6 @@ pub struct TableCell {
 }
 
 impl TableCell {
-    /// Creates a new TableCell with default row/column information
     pub fn new(bounds: [Coord<i32>; 4], confidence: f32) -> Self {
         Self {
             bounds,
@@ -46,9 +44,6 @@ impl TableCell {
         }
     }
 
-    /// Creates a TextBox from matched words and assigns it to the cell's content.
-    /// The TextBox bounds will be the cell bounds, and the text will be the
-    /// concatenation of all matched word texts.
     pub fn set_content_from_words(&mut self, words: &[TextBox]) {
         if words.is_empty() {
             return;
@@ -83,28 +78,23 @@ impl TableCell {
         });
     }
 
-    /// Returns the minimum x coordinate of the cell bounds
     pub fn min_x(&self) -> i32 {
         self.bounds.iter().map(|c| c.x).min().unwrap_or(0)
     }
 
-    /// Returns the maximum x coordinate of the cell bounds
     pub fn max_x(&self) -> i32 {
         self.bounds.iter().map(|c| c.x).max().unwrap_or(0)
     }
 
-    /// Returns the minimum y coordinate of the cell bounds
     pub fn min_y(&self) -> i32 {
         self.bounds.iter().map(|c| c.y).min().unwrap_or(0)
     }
 
-    /// Returns the maximum y coordinate of the cell bounds
     pub fn max_y(&self) -> i32 {
         self.bounds.iter().map(|c| c.y).max().unwrap_or(0)
     }
 }
 
-/// Represents a detected table with its structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Table {
     /// The bounding box of the entire table as 4 corner coordinates
@@ -128,8 +118,6 @@ impl Table {
     /// Tolerance for clustering cell boundaries into rows/columns (in pixels)
     const CLUSTER_TOLERANCE: i32 = 10;
 
-    /// Creates a new Table from detected cells, automatically determining row/column structure.
-    /// Cell bounds are offset to be relative to the document coordinates based on the table bounds.
     pub fn from_cells(
         detected_cells: Vec<TableCell>,
         bounds: [Coord<i32>; 4],
@@ -149,7 +137,6 @@ impl Table {
             };
         }
 
-        // Offset cell bounds to be relative to the document, not the cropped table image
         let offset_x = bounds.iter().map(|b| b.x).min().unwrap_or(0);
         let offset_y = bounds.iter().map(|b| b.y).min().unwrap_or(0);
 
@@ -178,13 +165,11 @@ impl Table {
             })
             .collect();
 
-        // Determine row and column structure from cell positions using centers
         let (row_centers, col_centers) = Self::compute_grid_boundaries(&cells);
-        // Row/column count equals the number of unique center positions
+
         let row_count = row_centers.len();
         let column_count = col_centers.len();
 
-        // Assign row/column indices and spans to each cell
         for cell in &mut cells {
             Self::assign_cell_position(cell, &row_centers, &col_centers);
         }
@@ -200,23 +185,17 @@ impl Table {
         }
     }
 
-    /// Computes the row and column boundaries from cell positions
-    /// Returns (row_boundaries, column_boundaries) where boundaries are sorted y/x coordinates
     fn compute_grid_boundaries(cells: &[TableCell]) -> (Vec<i32>, Vec<i32>) {
-        // Use cell center points to determine unique rows and columns
-        // This is more robust than using edges which can overlap
         let mut y_centers: Vec<i32> = cells.iter().map(|c| (c.min_y() + c.max_y()) / 2).collect();
 
         let mut x_centers: Vec<i32> = cells.iter().map(|c| (c.min_x() + c.max_x()) / 2).collect();
 
-        // Cluster centers to find unique row/column positions
         let row_centers = Self::cluster_boundaries(&mut y_centers);
         let col_centers = Self::cluster_boundaries(&mut x_centers);
 
         (row_centers, col_centers)
     }
 
-    /// Clusters nearby boundary values to handle slight misalignments
     fn cluster_boundaries(boundaries: &mut [i32]) -> Vec<i32> {
         if boundaries.is_empty() {
             return Vec::new();
@@ -231,14 +210,12 @@ impl Table {
             if boundary - current_cluster.last().unwrap_or(&0) <= Self::CLUSTER_TOLERANCE {
                 current_cluster.push(boundary);
             } else {
-                // Compute the mean of the current cluster
                 let mean = current_cluster.iter().sum::<i32>() / current_cluster.len() as i32;
                 clustered.push(mean);
                 current_cluster = vec![boundary];
             }
         }
 
-        // Don't forget the last cluster
         if !current_cluster.is_empty() {
             let mean = current_cluster.iter().sum::<i32>() / current_cluster.len() as i32;
             clustered.push(mean);
@@ -247,29 +224,20 @@ impl Table {
         clustered
     }
 
-    /// Assigns row/column index and span to a cell based on grid boundaries (row/col centers)
     fn assign_cell_position(cell: &mut TableCell, row_centers: &[i32], col_centers: &[i32]) {
-        // Use the cell's top-left corner to determine starting row/column index
-        // This ensures cells that span multiple rows/columns get assigned to their
-        // starting position, not a middle position based on center
         let cell_top = cell.min_y();
         let cell_left = cell.min_x();
 
-        // Find the closest row center to the cell's top edge (starting row)
         let row_idx = Self::find_closest_center_index(cell_top, row_centers);
-
-        // Find the closest column center to the cell's left edge (starting column)
         let col_idx = Self::find_closest_center_index(cell_left, col_centers);
 
         cell.row_index = row_idx;
         cell.column_index = col_idx;
 
-        // For span calculation, check how many row/column centers fall within the cell bounds
-        cell.row_span = Self::calculate_span(cell.min_y(), cell.max_y(), row_centers);
-        cell.column_span = Self::calculate_span(cell.min_x(), cell.max_x(), col_centers);
+        cell.row_span = Self::calculate_table_span(cell.min_y(), cell.max_y(), row_centers);
+        cell.column_span = Self::calculate_table_span(cell.min_x(), cell.max_x(), col_centers);
     }
 
-    /// Finds the index of the closest center to the given coordinate
     fn find_closest_center_index(coord: i32, centers: &[i32]) -> usize {
         if centers.is_empty() {
             return 0;
@@ -289,8 +257,7 @@ impl Table {
         best_idx
     }
 
-    /// Calculates how many centers fall within the given range (for span calculation)
-    fn calculate_span(min_coord: i32, max_coord: i32, centers: &[i32]) -> usize {
+    fn calculate_table_span(min_coord: i32, max_coord: i32, centers: &[i32]) -> usize {
         let tolerance = Self::CLUSTER_TOLERANCE;
         let count = centers
             .iter()
