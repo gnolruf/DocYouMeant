@@ -1,6 +1,7 @@
 use geo::Coord;
 use serde::{Deserialize, Serialize};
 
+use crate::document::text_box::TextBox;
 use crate::utils::serialization_utils::coord_array_i32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -27,6 +28,8 @@ pub struct TableCell {
     pub row_span: usize,
     /// Number of columns spanned by this cell
     pub column_span: usize,
+    /// The text content within this cell, created from matched words
+    pub content: Option<TextBox>,
 }
 
 impl TableCell {
@@ -39,7 +42,45 @@ impl TableCell {
             column_index: 0,
             row_span: 1,
             column_span: 1,
+            content: None,
         }
+    }
+
+    /// Creates a TextBox from matched words and assigns it to the cell's content.
+    /// The TextBox bounds will be the cell bounds, and the text will be the
+    /// concatenation of all matched word texts.
+    pub fn set_content_from_words(&mut self, words: &[TextBox]) {
+        if words.is_empty() {
+            return;
+        }
+
+        let mut texts = Vec::new();
+        let mut total_text_score = 0.0;
+        let mut total_box_score = 0.0;
+
+        for word in words {
+            if let Some(ref text) = word.text {
+                texts.push(text.clone());
+                total_text_score += word.text_score;
+                total_box_score += word.box_score;
+            }
+        }
+
+        if texts.is_empty() {
+            return;
+        }
+
+        let word_count = texts.len() as f32;
+        let combined_text = texts.join(" ");
+
+        self.content = Some(TextBox {
+            bounds: self.bounds,
+            angle: None,
+            text: Some(combined_text),
+            box_score: total_box_score / word_count,
+            text_score: total_text_score / word_count,
+            span: None,
+        });
     }
 
     /// Returns the minimum x coordinate of the cell bounds
@@ -247,5 +288,21 @@ impl Table {
 
         // If coord is beyond all boundaries, return the last interval
         boundaries.len().saturating_sub(2)
+    }
+
+    pub fn match_words_to_cells(&mut self, words: &[TextBox], overlap_threshold: f32) {
+        use crate::utils::box_utils;
+
+        for cell in &mut self.cells {
+            let matched_words: Vec<TextBox> = words
+                .iter()
+                .filter(|word| {
+                    box_utils::calculate_overlap(&word.bounds, &cell.bounds) >= overlap_threshold
+                })
+                .cloned()
+                .collect();
+
+            cell.set_content_from_words(&matched_words);
+        }
     }
 }

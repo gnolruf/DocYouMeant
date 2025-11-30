@@ -462,13 +462,17 @@ impl AnalysisPipeline {
             }
         };
 
-        let (layout_boxes, tables) = if self.process_mode == ProcessMode::Read {
+        let (layout_boxes, mut tables) = if self.process_mode == ProcessMode::Read {
             (Vec::new(), Vec::new())
         } else {
             let layout = self.detect_layout(&oriented_image)?;
             let tables = self.detect_tables(&oriented_image, &layout, page.page_number)?;
             (layout, tables)
         };
+
+        for table in &mut tables {
+            table.match_words_to_cells(&page.words, 0.5);
+        }
 
         Ok((
             text_lines,
@@ -595,13 +599,17 @@ impl AnalysisPipeline {
             .map_err(|source| DocumentError::ModelProcessingError { source })?;
         debug!("Recognized text for {} lines", words.len());
 
-        let (layout_boxes, tables) = if self.process_mode == ProcessMode::Read {
+        let (layout_boxes, mut tables) = if self.process_mode == ProcessMode::Read {
             (Vec::new(), Vec::new())
         } else {
             let layout = self.detect_layout(&oriented_image)?;
             let tables = self.detect_tables(&oriented_image, &layout, page_number)?;
             (layout, tables)
         };
+
+        for table in &mut tables {
+            table.match_words_to_cells(&words, 0.5);
+        }
 
         Ok((
             text_lines,
