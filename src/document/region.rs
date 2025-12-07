@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::document::bounds::Bounds;
 use crate::document::layout_box::{LayoutBox, LayoutClass};
 use crate::document::text_box::{Orientation, TextBox};
-use crate::utils::box_utils::{self, HasBounds};
+use crate::utils::box_utils;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,12 +43,6 @@ impl DocumentRegion {
     pub fn with_confidence(mut self, confidence: f32) -> Self {
         self.confidence = Some(confidence);
         self
-    }
-}
-
-impl HasBounds for TextBox {
-    fn get_bounds(&self) -> &Bounds {
-        &self.bounds
     }
 }
 

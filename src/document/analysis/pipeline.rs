@@ -266,7 +266,8 @@ impl AnalysisPipeline {
             DBNet::run(image).map_err(|source| DocumentError::ModelProcessingError { source })?;
         debug!("Detected {} raw text lines", text_lines.len());
 
-        let ordered_indices = box_utils::graph_based_reading_order(&text_lines);
+        let bounds_list: Vec<_> = text_lines.iter().map(|t| t.bounds).collect();
+        let ordered_indices = box_utils::graph_based_reading_order(&bounds_list);
         let ordered_text_lines: Vec<TextBox> = ordered_indices
             .iter()
             .filter_map(|&idx| {

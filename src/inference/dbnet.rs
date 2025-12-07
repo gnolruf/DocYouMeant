@@ -1,10 +1,12 @@
 use geo::Coord;
-use image::{ImageBuffer, RgbImage};
+use image::{ImageBuffer, Luma, RgbImage};
 use imageproc::contours::{find_contours_with_threshold, Contour};
 use imageproc::distance_transform::Norm;
+use imageproc::drawing::draw_polygon_mut;
 use imageproc::geometry::min_area_rect;
 use imageproc::morphology::dilate;
 use imageproc::point::Point;
+use imageproc::point::Point as ImageProcPoint;
 use ndarray::Array2;
 use once_cell::sync::OnceCell;
 use ort::{inputs, session::Session, value::Value};
@@ -251,7 +253,7 @@ impl DBNet {
                 continue;
             }
 
-            let box_score = match box_utils::box_score(&min_boxes, pred_array) {
+            let box_score = match Self::box_score(&min_boxes, pred_array) {
                 Ok(score) => score,
                 Err(_) => continue,
             };
@@ -379,6 +381,92 @@ impl DBNet {
         }
 
         result
+    }
+
+    /// Calculates the average prediction score within a bounding box region.
+    ///
+    /// This function computes the mean value of a prediction map (typically a
+    /// probability/confidence map) within the area defined by a bounding box.
+    /// It uses a polygon mask to accurately include only pixels inside the box.
+    ///
+    /// # Arguments
+    ///
+    /// * `boxes` - Four corner points defining the bounding box
+    /// * `pred` - 2D array of prediction values (e.g., text probability map)
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(f32)` - Average prediction value within the box (0.0 to 1.0 for probability maps)
+    /// * `Err` - If an error occurs during processing
+    ///
+    /// Returns 0.0 if the prediction array is empty or no pixels fall within the box.
+    ///
+    /// # Algorithm
+    ///
+    /// 1. Compute the axis-aligned bounding rectangle of the box
+    /// 2. Create a binary mask by rasterizing the polygon
+    /// 3. Sum prediction values where the mask is non-zero
+    /// 4. Return the average
+    pub fn box_score(
+        boxes: &[Coord<i32>; 4],
+        pred: &Array2<f32>,
+    ) -> Result<f32, Box<dyn std::error::Error + Send + Sync>> {
+        let width = pred.ncols();
+        let height = pred.nrows();
+
+        if width == 0 || height == 0 {
+            return Ok(0.0);
+        }
+
+        let mut min_x = boxes[0].x;
+        let mut max_x = boxes[0].x;
+        let mut min_y = boxes[0].y;
+        let mut max_y = boxes[0].y;
+
+        for point in &boxes[1..] {
+            min_x = min_x.min(point.x);
+            max_x = max_x.max(point.x);
+            min_y = min_y.min(point.y);
+            max_y = max_y.max(point.y);
+        }
+
+        let clamp_min_x = min_x.clamp(0, width as i32 - 1);
+        let clamp_max_x = max_x.clamp(0, width as i32 - 1);
+        let clamp_min_y = min_y.clamp(0, height as i32 - 1);
+        let clamp_max_y = max_y.clamp(0, height as i32 - 1);
+
+        let mask_width = (clamp_max_x - clamp_min_x + 1) as u32;
+        let mask_height = (clamp_max_y - clamp_min_y + 1) as u32;
+
+        let mut mask: image::GrayImage = ImageBuffer::new(mask_width, mask_height);
+
+        let polygon_points: Vec<ImageProcPoint<i32>> = boxes
+            .iter()
+            .map(|point| ImageProcPoint::new(point.x - clamp_min_x, point.y - clamp_min_y))
+            .collect();
+
+        draw_polygon_mut(&mut mask, &polygon_points, Luma([255u8]));
+
+        let mut sum = 0.0;
+        let mut count = 0;
+
+        for y in clamp_min_y..=clamp_max_y {
+            for x in clamp_min_x..=clamp_max_x {
+                let mask_x = (x - clamp_min_x) as u32;
+                let mask_y = (y - clamp_min_y) as u32;
+
+                if mask.get_pixel(mask_x, mask_y)[0] > 0 {
+                    sum += pred[(y as usize, x as usize)];
+                    count += 1;
+                }
+            }
+        }
+
+        if count > 0 {
+            Ok(sum / count as f32)
+        } else {
+            Ok(0.0)
+        }
     }
 
     pub fn run(image: &RgbImage) -> Result<Vec<TextBox>, InferenceError> {

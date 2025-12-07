@@ -3,10 +3,6 @@
 use crate::document::bounds::Bounds;
 use geo::{Area, BooleanOps, Coord, LineString, Polygon};
 use geo_clipper::Clipper;
-use image::{GrayImage, ImageBuffer, Luma};
-use imageproc::drawing::draw_polygon_mut;
-use imageproc::point::Point as ImageProcPoint;
-use ndarray::Array2;
 
 /// Calculates the Intersection over Union (IoU) between two polygons.
 ///
@@ -260,7 +256,6 @@ pub fn unclip_box(
 /// 1. Sort points by x-coordinate
 /// 2. Assign left two points (index1, index4) based on y-coordinate
 /// 3. Assign right two points (index2, index3) based on y-coordinate
-#[inline]
 pub fn get_min_boxes(corner_points: &[Coord<i32>; 4]) -> ([Coord<i32>; 4], f32) {
     let dx1 = (corner_points[1].x - corner_points[0].x) as f32;
     let dy1 = (corner_points[1].y - corner_points[0].y) as f32;
@@ -304,92 +299,6 @@ pub fn get_min_boxes(corner_points: &[Coord<i32>; 4]) -> ([Coord<i32>; 4], f32) 
     (min_box, max_side_len)
 }
 
-/// Calculates the average prediction score within a bounding box region.
-///
-/// This function computes the mean value of a prediction map (typically a
-/// probability/confidence map) within the area defined by a bounding box.
-/// It uses a polygon mask to accurately include only pixels inside the box.
-///
-/// # Arguments
-///
-/// * `boxes` - Four corner points defining the bounding box
-/// * `pred` - 2D array of prediction values (e.g., text probability map)
-///
-/// # Returns
-///
-/// * `Ok(f32)` - Average prediction value within the box (0.0 to 1.0 for probability maps)
-/// * `Err` - If an error occurs during processing
-///
-/// Returns 0.0 if the prediction array is empty or no pixels fall within the box.
-///
-/// # Algorithm
-///
-/// 1. Compute the axis-aligned bounding rectangle of the box
-/// 2. Create a binary mask by rasterizing the polygon
-/// 3. Sum prediction values where the mask is non-zero
-/// 4. Return the average
-pub fn box_score(
-    boxes: &[Coord<i32>; 4],
-    pred: &Array2<f32>,
-) -> Result<f32, Box<dyn std::error::Error + Send + Sync>> {
-    let width = pred.ncols();
-    let height = pred.nrows();
-
-    if width == 0 || height == 0 {
-        return Ok(0.0);
-    }
-
-    let mut min_x = boxes[0].x;
-    let mut max_x = boxes[0].x;
-    let mut min_y = boxes[0].y;
-    let mut max_y = boxes[0].y;
-
-    for point in &boxes[1..] {
-        min_x = min_x.min(point.x);
-        max_x = max_x.max(point.x);
-        min_y = min_y.min(point.y);
-        max_y = max_y.max(point.y);
-    }
-
-    let clamp_min_x = min_x.clamp(0, width as i32 - 1);
-    let clamp_max_x = max_x.clamp(0, width as i32 - 1);
-    let clamp_min_y = min_y.clamp(0, height as i32 - 1);
-    let clamp_max_y = max_y.clamp(0, height as i32 - 1);
-
-    let mask_width = (clamp_max_x - clamp_min_x + 1) as u32;
-    let mask_height = (clamp_max_y - clamp_min_y + 1) as u32;
-
-    let mut mask: GrayImage = ImageBuffer::new(mask_width, mask_height);
-
-    let polygon_points: Vec<ImageProcPoint<i32>> = boxes
-        .iter()
-        .map(|point| ImageProcPoint::new(point.x - clamp_min_x, point.y - clamp_min_y))
-        .collect();
-
-    draw_polygon_mut(&mut mask, &polygon_points, Luma([255u8]));
-
-    let mut sum = 0.0;
-    let mut count = 0;
-
-    for y in clamp_min_y..=clamp_max_y {
-        for x in clamp_min_x..=clamp_max_x {
-            let mask_x = (x - clamp_min_x) as u32;
-            let mask_y = (y - clamp_min_y) as u32;
-
-            if mask.get_pixel(mask_x, mask_y)[0] > 0 {
-                sum += pred[(y as usize, x as usize)];
-                count += 1;
-            }
-        }
-    }
-
-    if count > 0 {
-        Ok(sum / count as f32)
-    } else {
-        Ok(0.0)
-    }
-}
-
 /// Determines the natural reading order of bounding boxes using a graph-based approach.
 ///
 /// This function establishes a partial ordering of text boxes based on their
@@ -397,13 +306,9 @@ pub fn box_score(
 /// reading sequence that respects the natural left-to-right, top-to-bottom
 /// reading flow.
 ///
-/// # Type Parameters
-///
-/// * `T` - Any type implementing the [`HasBounds`] trait
-///
 /// # Arguments
 ///
-/// * `boxes` - Slice of items with bounding box information
+/// * `bounds_list` - Slice of bounding boxes to order
 ///
 /// # Returns
 ///
@@ -421,17 +326,12 @@ pub fn box_score(
 /// # Note
 ///
 /// Returns 1-indexed positions to match common document labeling conventions.
-pub fn graph_based_reading_order<T>(boxes: &[T]) -> Vec<usize>
-where
-    T: HasBounds,
-{
-    if boxes.is_empty() {
+pub fn graph_based_reading_order(bounds_list: &[Bounds]) -> Vec<usize> {
+    if bounds_list.is_empty() {
         return Vec::new();
     }
 
-    let n = boxes.len();
-
-    let bounds_list: Vec<&Bounds> = boxes.iter().map(|b| b.get_bounds()).collect();
+    let n = bounds_list.len();
 
     let mut graph: Vec<Vec<usize>> = vec![Vec::new(); n];
     let mut in_degree: Vec<usize> = vec![0; n];
@@ -442,7 +342,7 @@ where
                 continue;
             }
 
-            if should_come_before(bounds_list[i], bounds_list[j]) {
+            if should_come_before(&bounds_list[i], &bounds_list[j]) {
                 graph[i].push(j);
                 in_degree[j] += 1;
             }
@@ -460,8 +360,8 @@ where
     }
 
     queue.sort_by(|&a, &b| {
-        let bounds_a = bounds_list[a];
-        let bounds_b = bounds_list[b];
+        let bounds_a = &bounds_list[a];
+        let bounds_b = &bounds_list[b];
 
         match bounds_a.center_y().cmp(&bounds_b.center_y()) {
             std::cmp::Ordering::Equal => bounds_a.center_x().cmp(&bounds_b.center_x()),
@@ -478,8 +378,8 @@ where
                 queue.push(neighbor);
 
                 queue.sort_by(|&a, &b| {
-                    let bounds_a = bounds_list[a];
-                    let bounds_b = bounds_list[b];
+                    let bounds_a = &bounds_list[a];
+                    let bounds_b = &bounds_list[b];
 
                     match bounds_a.center_y().cmp(&bounds_b.center_y()) {
                         std::cmp::Ordering::Equal => bounds_a.center_x().cmp(&bounds_b.center_x()),
@@ -493,8 +393,8 @@ where
     if result.len() < n {
         let mut remaining: Vec<usize> = (0..n).filter(|i| !result.contains(i)).collect();
         remaining.sort_by(|&a, &b| {
-            let bounds_a = bounds_list[a];
-            let bounds_b = bounds_list[b];
+            let bounds_a = &bounds_list[a];
+            let bounds_b = &bounds_list[b];
 
             match bounds_a.center_y().cmp(&bounds_b.center_y()) {
                 std::cmp::Ordering::Equal => bounds_a.center_x().cmp(&bounds_b.center_x()),
@@ -505,32 +405,6 @@ where
     }
 
     result.into_iter().map(|i| i + 1).collect()
-}
-
-/// Trait for types that have bounding box coordinates.
-///
-/// Implement this trait for any type that has spatial bounds to enable
-/// use with [`graph_based_reading_order`] and other spatial algorithms.
-///
-/// # Example
-///
-/// ```ignore
-/// use crate::document::bounds::Bounds;
-///
-/// struct TextBox {
-///     text: String,
-///     bounds: Bounds,
-/// }
-///
-/// impl HasBounds for TextBox {
-///     fn get_bounds(&self) -> &Bounds {
-///         &self.bounds
-///     }
-/// }
-/// ```
-pub trait HasBounds {
-    /// Returns a reference to the Bounds.
-    fn get_bounds(&self) -> &Bounds;
 }
 
 /// Determines if one box should be read before another based on spatial position.

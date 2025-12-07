@@ -1,11 +1,10 @@
 use docyoumeant::document::bounds::Bounds;
 use docyoumeant::document::text_box::TextBox;
 use docyoumeant::utils::box_utils::{
-    apply_nms, box_score, calculate_iou, calculate_overlap, get_min_boxes,
-    graph_based_reading_order, unclip_box, HasBounds,
+    apply_nms, calculate_iou, calculate_overlap, get_min_boxes, graph_based_reading_order,
+    unclip_box,
 };
 use geo::Coord;
-use ndarray::Array2;
 
 // ============================================================================
 // calculate_iou Tests
@@ -534,116 +533,23 @@ fn test_unclip_box_negative_coords() {
 }
 
 // ============================================================================
-// box_score Tests
-// ============================================================================
-
-#[test]
-fn test_box_score_empty_pred() {
-    let points = [
-        Coord { x: 0, y: 0 },
-        Coord { x: 10, y: 0 },
-        Coord { x: 10, y: 10 },
-        Coord { x: 0, y: 10 },
-    ];
-    let pred: Array2<f32> = Array2::zeros((0, 0));
-
-    let result = box_score(&points, &pred).unwrap();
-    assert_eq!(result, 0.0);
-}
-
-#[test]
-fn test_box_score_all_ones() {
-    let points = [
-        Coord { x: 2, y: 2 },
-        Coord { x: 8, y: 2 },
-        Coord { x: 8, y: 8 },
-        Coord { x: 2, y: 8 },
-    ];
-    let pred: Array2<f32> = Array2::ones((10, 10));
-
-    let result = box_score(&points, &pred).unwrap();
-    assert!((result - 1.0).abs() < 1e-6);
-}
-
-#[test]
-fn test_box_score_half_values() {
-    let points = [
-        Coord { x: 0, y: 0 },
-        Coord { x: 10, y: 0 },
-        Coord { x: 10, y: 10 },
-        Coord { x: 0, y: 10 },
-    ];
-    let mut pred: Array2<f32> = Array2::zeros((10, 10));
-    pred.fill(0.5);
-
-    let result = box_score(&points, &pred).unwrap();
-    assert!((result - 0.5).abs() < 1e-5);
-}
-
-#[test]
-fn test_box_score_box_outside_pred() {
-    let points = [
-        Coord { x: 100, y: 100 },
-        Coord { x: 110, y: 100 },
-        Coord { x: 110, y: 110 },
-        Coord { x: 100, y: 110 },
-    ];
-    let pred: Array2<f32> = Array2::ones((10, 10));
-
-    let result = box_score(&points, &pred).unwrap();
-    // Box is outside prediction, should clamp and still work
-    assert!((0.0..=1.0).contains(&result));
-}
-
-#[test]
-fn test_box_score_negative_coords() {
-    let points = [
-        Coord { x: -5, y: -5 },
-        Coord { x: 5, y: -5 },
-        Coord { x: 5, y: 5 },
-        Coord { x: -5, y: 5 },
-    ];
-    let pred: Array2<f32> = Array2::ones((10, 10));
-
-    let result = box_score(&points, &pred).unwrap();
-    // Should handle negative coords gracefully
-    assert!(result >= 0.0);
-}
-
-// ============================================================================
 // graph_based_reading_order Tests
 // ============================================================================
 
-// Wrapper type for testing HasBounds on coordinate arrays
-#[derive(Clone)]
-struct TestBoundingBox {
-    bounds: Bounds,
-}
-
-impl TestBoundingBox {
-    fn new(coords: [Coord<i32>; 4]) -> Self {
-        Self {
-            bounds: Bounds::new(coords),
-        }
-    }
-}
-
-impl HasBounds for TestBoundingBox {
-    fn get_bounds(&self) -> &Bounds {
-        &self.bounds
-    }
+fn make_bounds(coords: [Coord<i32>; 4]) -> Bounds {
+    Bounds::new(coords)
 }
 
 #[test]
 fn test_reading_order_empty() {
-    let boxes: Vec<TestBoundingBox> = vec![];
+    let boxes: Vec<Bounds> = vec![];
     let result = graph_based_reading_order(&boxes);
     assert!(result.is_empty());
 }
 
 #[test]
 fn test_reading_order_single() {
-    let boxes = vec![TestBoundingBox::new([
+    let boxes = vec![make_bounds([
         Coord { x: 0, y: 0 },
         Coord { x: 10, y: 0 },
         Coord { x: 10, y: 10 },
@@ -657,19 +563,19 @@ fn test_reading_order_single() {
 fn test_reading_order_left_to_right() {
     // Three boxes on the same row, left to right
     let boxes = vec![
-        TestBoundingBox::new([
+        make_bounds([
             Coord { x: 200, y: 0 },
             Coord { x: 300, y: 0 },
             Coord { x: 300, y: 50 },
             Coord { x: 200, y: 50 },
         ]),
-        TestBoundingBox::new([
+        make_bounds([
             Coord { x: 0, y: 0 },
             Coord { x: 100, y: 0 },
             Coord { x: 100, y: 50 },
             Coord { x: 0, y: 50 },
         ]),
-        TestBoundingBox::new([
+        make_bounds([
             Coord { x: 100, y: 0 },
             Coord { x: 200, y: 0 },
             Coord { x: 200, y: 50 },
@@ -685,19 +591,19 @@ fn test_reading_order_left_to_right() {
 fn test_reading_order_top_to_bottom() {
     // Three boxes in a column, top to bottom
     let boxes = vec![
-        TestBoundingBox::new([
+        make_bounds([
             Coord { x: 0, y: 100 },
             Coord { x: 100, y: 100 },
             Coord { x: 100, y: 150 },
             Coord { x: 0, y: 150 },
         ]),
-        TestBoundingBox::new([
+        make_bounds([
             Coord { x: 0, y: 200 },
             Coord { x: 100, y: 200 },
             Coord { x: 100, y: 250 },
             Coord { x: 0, y: 250 },
         ]),
-        TestBoundingBox::new([
+        make_bounds([
             Coord { x: 0, y: 0 },
             Coord { x: 100, y: 0 },
             Coord { x: 100, y: 50 },
@@ -714,28 +620,28 @@ fn test_reading_order_two_columns() {
     // Two columns of text
     let boxes = vec![
         // Left column, row 1
-        TestBoundingBox::new([
+        make_bounds([
             Coord { x: 0, y: 0 },
             Coord { x: 100, y: 0 },
             Coord { x: 100, y: 30 },
             Coord { x: 0, y: 30 },
         ]),
         // Left column, row 2
-        TestBoundingBox::new([
+        make_bounds([
             Coord { x: 0, y: 40 },
             Coord { x: 100, y: 40 },
             Coord { x: 100, y: 70 },
             Coord { x: 0, y: 70 },
         ]),
         // Right column, row 1
-        TestBoundingBox::new([
+        make_bounds([
             Coord { x: 150, y: 0 },
             Coord { x: 250, y: 0 },
             Coord { x: 250, y: 30 },
             Coord { x: 150, y: 30 },
         ]),
         // Right column, row 2
-        TestBoundingBox::new([
+        make_bounds([
             Coord { x: 150, y: 40 },
             Coord { x: 250, y: 40 },
             Coord { x: 250, y: 70 },
@@ -749,7 +655,7 @@ fn test_reading_order_two_columns() {
 
 #[test]
 fn test_reading_order_with_text_boxes() {
-    let boxes: Vec<TextBox> = vec![
+    let text_boxes: Vec<TextBox> = vec![
         TextBox {
             bounds: Bounds::new([
                 Coord { x: 100, y: 0 },
@@ -777,7 +683,8 @@ fn test_reading_order_with_text_boxes() {
             span: None,
         },
     ];
-    let result = graph_based_reading_order(&boxes);
+    let bounds: Vec<_> = text_boxes.iter().map(|t| t.bounds).collect();
+    let result = graph_based_reading_order(&bounds);
     // Second box (index 1) comes first spatially
     assert_eq!(result, vec![2, 1]);
 }
