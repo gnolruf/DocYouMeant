@@ -1,8 +1,8 @@
 use geo::Coord;
 use serde::{Deserialize, Serialize};
 
+use crate::document::bounds::Bounds;
 use crate::document::text_box::TextBox;
-use crate::utils::serialization_utils::coord_array_i32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TableType {
@@ -15,8 +15,7 @@ pub enum TableType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableCell {
     /// The bounding box of the cell as 4 corner coordinates
-    #[serde(with = "coord_array_i32")]
-    pub bounds: [Coord<i32>; 4],
+    pub bounds: Bounds,
     /// The confidence score of the detection
     pub confidence: f32,
     /// Row index of the cell (0-indexed)
@@ -32,7 +31,7 @@ pub struct TableCell {
 }
 
 impl TableCell {
-    pub fn new(bounds: [Coord<i32>; 4], confidence: f32) -> Self {
+    pub fn new(bounds: Bounds, confidence: f32) -> Self {
         Self {
             bounds,
             confidence,
@@ -79,27 +78,26 @@ impl TableCell {
     }
 
     pub fn min_x(&self) -> i32 {
-        self.bounds.iter().map(|c| c.x).min().unwrap_or(0)
+        self.bounds.left()
     }
 
     pub fn max_x(&self) -> i32 {
-        self.bounds.iter().map(|c| c.x).max().unwrap_or(0)
+        self.bounds.right()
     }
 
     pub fn min_y(&self) -> i32 {
-        self.bounds.iter().map(|c| c.y).min().unwrap_or(0)
+        self.bounds.top()
     }
 
     pub fn max_y(&self) -> i32 {
-        self.bounds.iter().map(|c| c.y).max().unwrap_or(0)
+        self.bounds.bottom()
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Table {
     /// The bounding box of the entire table as 4 corner coordinates
-    #[serde(with = "coord_array_i32")]
-    pub bounds: [Coord<i32>; 4],
+    pub bounds: Bounds,
     /// The type of table (wired or wireless)
     pub table_type: TableType,
     /// Number of rows in the table
@@ -120,7 +118,7 @@ impl Table {
 
     pub fn from_cells(
         detected_cells: Vec<TableCell>,
-        bounds: [Coord<i32>; 4],
+        bounds: Bounds,
         table_type: TableType,
         page_number: usize,
         confidence: f32,
@@ -137,13 +135,13 @@ impl Table {
             };
         }
 
-        let offset_x = bounds.iter().map(|b| b.x).min().unwrap_or(0);
-        let offset_y = bounds.iter().map(|b| b.y).min().unwrap_or(0);
+        let offset_x = bounds.left();
+        let offset_y = bounds.top();
 
         let mut cells: Vec<TableCell> = detected_cells
             .into_iter()
             .map(|c| {
-                let offset_bounds = [
+                let offset_bounds = Bounds::new([
                     Coord {
                         x: c.bounds[0].x + offset_x,
                         y: c.bounds[0].y + offset_y,
@@ -160,7 +158,7 @@ impl Table {
                         x: c.bounds[3].x + offset_x,
                         y: c.bounds[3].y + offset_y,
                     },
-                ];
+                ]);
                 TableCell::new(offset_bounds, c.confidence)
             })
             .collect();
@@ -280,7 +278,8 @@ impl Table {
             let matched_words: Vec<TextBox> = words
                 .iter()
                 .filter(|word| {
-                    box_utils::calculate_overlap(&word.bounds, &cell.bounds) >= overlap_threshold
+                    box_utils::calculate_overlap(word.bounds.as_slice(), cell.bounds.as_slice())
+                        >= overlap_threshold
                 })
                 .cloned()
                 .collect();

@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod bounds;
 pub mod content;
 pub mod error;
 pub mod layout_box;

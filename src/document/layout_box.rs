@@ -1,7 +1,6 @@
-use geo::Coord;
 use serde::{Deserialize, Serialize};
 
-use crate::utils::serialization_utils::coord_array_i32;
+use crate::document::bounds::Bounds;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -58,8 +57,7 @@ impl LayoutClass {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayoutBox {
-    #[serde(with = "coord_array_i32")]
-    pub bounds: [Coord<i32>; 4],
+    pub bounds: Bounds,
     pub class: LayoutClass,
     pub confidence: f32,
 }

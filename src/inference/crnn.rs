@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader};
 use image::{imageops, RgbImage};
 use ort::{inputs, session::Session, value::Value};
 
+use crate::document::bounds::Bounds;
 use crate::document::text_box::TextBox;
 use crate::inference::error::InferenceError;
 use crate::utils::image_utils;
@@ -190,7 +191,7 @@ impl Crnn {
                         let word_len = current_word.len();
                         words.push(TextBox {
                             text: Some(current_word.clone()),
-                            bounds: word_bounds,
+                            bounds: Bounds::new(word_bounds),
                             angle: text_box.angle,
                             box_score: word_score,
                             text_score: word_score,
@@ -232,7 +233,7 @@ impl Crnn {
                 let word_len = current_word.len();
                 words.push(TextBox {
                     text: Some(current_word),
-                    bounds: word_bounds,
+                    bounds: Bounds::new(word_bounds),
                     angle: text_box.angle,
                     box_score: word_score,
                     text_score: word_score,

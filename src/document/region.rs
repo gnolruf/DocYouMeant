@@ -1,10 +1,10 @@
 use geo::Coord;
 use serde::{Deserialize, Serialize};
 
+use crate::document::bounds::Bounds;
 use crate::document::layout_box::{LayoutBox, LayoutClass};
 use crate::document::text_box::{Orientation, TextBox};
 use crate::utils::box_utils::{self, HasBounds};
-use crate::utils::serialization_utils::coord_vec_i32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,20 +23,14 @@ pub enum RegionRole {
 pub struct DocumentRegion {
     pub role: RegionRole,
     pub page_number: usize,
-    #[serde(with = "coord_vec_i32")]
-    pub bounds: Vec<Coord<i32>>,
+    pub bounds: Bounds,
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f32>,
 }
 
 impl DocumentRegion {
-    pub fn new(
-        role: RegionRole,
-        page_number: usize,
-        bounds: Vec<Coord<i32>>,
-        content: String,
-    ) -> Self {
+    pub fn new(role: RegionRole, page_number: usize, bounds: Bounds, content: String) -> Self {
         Self {
             role,
             page_number,
@@ -53,7 +47,7 @@ impl DocumentRegion {
 }
 
 impl HasBounds for TextBox {
-    fn get_bounds(&self) -> &[Coord<i32>] {
+    fn get_bounds(&self) -> &Bounds {
         &self.bounds
     }
 }
@@ -90,7 +84,7 @@ impl DocumentRegionBuilder {
                     let avg_confidence = combined_text_box.text_score.max(layout_box.confidence);
 
                     let content = combined_text_box.text.unwrap_or_default();
-                    let bounds = combined_text_box.bounds.to_vec();
+                    let bounds = combined_text_box.bounds;
 
                     regions.push(
                         DocumentRegion::new(role, page_number, bounds, content)
@@ -104,7 +98,7 @@ impl DocumentRegionBuilder {
     }
 
     fn combine_overlapping_text_boxes(
-        layout_bounds: &[Coord<i32>; 4],
+        layout_bounds: &Bounds,
         text_boxes: &[TextBox],
         used_text_boxes: &mut [bool],
         overlap_threshold: f32,
@@ -116,7 +110,8 @@ impl DocumentRegionBuilder {
                 continue;
             }
 
-            let overlap = box_utils::calculate_overlap(&text_box.bounds, layout_bounds);
+            let overlap =
+                box_utils::calculate_overlap(text_box.bounds.as_slice(), layout_bounds.as_slice());
 
             if overlap > overlap_threshold {
                 overlapping_texts.push((i, text_box.clone()));
@@ -132,10 +127,10 @@ impl DocumentRegionBuilder {
         }
 
         overlapping_texts.sort_by(|a, b| {
-            let a_y = a.1.bounds.iter().map(|c| c.y).min().unwrap_or(0);
-            let b_y = b.1.bounds.iter().map(|c| c.y).min().unwrap_or(0);
-            let a_x = a.1.bounds.iter().map(|c| c.x).min().unwrap_or(0);
-            let b_x = b.1.bounds.iter().map(|c| c.x).min().unwrap_or(0);
+            let a_y = a.1.bounds.top();
+            let b_y = b.1.bounds.top();
+            let a_x = a.1.bounds.left();
+            let b_x = b.1.bounds.left();
 
             match a_y.cmp(&b_y) {
                 std::cmp::Ordering::Equal => a_x.cmp(&b_x),
@@ -152,7 +147,7 @@ impl DocumentRegionBuilder {
 
         let all_coords: Vec<Coord<i32>> = overlapping_texts
             .iter()
-            .flat_map(|(_, tb)| tb.bounds.iter().copied())
+            .flat_map(|(_, tb)| tb.bounds.as_slice().iter().copied())
             .collect();
 
         let min_x = all_coords.iter().map(|c| c.x).min().unwrap_or(0);
@@ -160,12 +155,12 @@ impl DocumentRegionBuilder {
         let min_y = all_coords.iter().map(|c| c.y).min().unwrap_or(0);
         let max_y = all_coords.iter().map(|c| c.y).max().unwrap_or(0);
 
-        let combined_bounds = [
+        let combined_bounds = Bounds::new([
             Coord { x: min_x, y: min_y },
             Coord { x: max_x, y: min_y },
             Coord { x: max_x, y: max_y },
             Coord { x: min_x, y: max_y },
-        ];
+        ]);
 
         let total_box_score: f32 = overlapping_texts.iter().map(|(_, tb)| tb.box_score).sum();
         let total_text_score: f32 = overlapping_texts.iter().map(|(_, tb)| tb.text_score).sum();

@@ -1,3 +1,4 @@
+use docyoumeant::document::bounds::Bounds;
 use docyoumeant::document::text_box::TextBox;
 use docyoumeant::utils::box_utils::{
     apply_nms, box_score, calculate_iou, calculate_overlap, get_min_boxes,
@@ -616,18 +617,20 @@ fn test_box_score_negative_coords() {
 // Wrapper type for testing HasBounds on coordinate arrays
 #[derive(Clone)]
 struct TestBoundingBox {
-    coords: [Coord<i32>; 4],
+    bounds: Bounds,
 }
 
 impl TestBoundingBox {
     fn new(coords: [Coord<i32>; 4]) -> Self {
-        Self { coords }
+        Self {
+            bounds: Bounds::new(coords),
+        }
     }
 }
 
 impl HasBounds for TestBoundingBox {
-    fn get_bounds(&self) -> &[Coord<i32>] {
-        &self.coords
+    fn get_bounds(&self) -> &Bounds {
+        &self.bounds
     }
 }
 
@@ -748,12 +751,12 @@ fn test_reading_order_two_columns() {
 fn test_reading_order_with_text_boxes() {
     let boxes: Vec<TextBox> = vec![
         TextBox {
-            bounds: [
+            bounds: Bounds::new([
                 Coord { x: 100, y: 0 },
                 Coord { x: 200, y: 0 },
                 Coord { x: 200, y: 30 },
                 Coord { x: 100, y: 30 },
-            ],
+            ]),
             angle: None,
             text: Some("Second".into()),
             box_score: 0.9,
@@ -761,12 +764,12 @@ fn test_reading_order_with_text_boxes() {
             span: None,
         },
         TextBox {
-            bounds: [
+            bounds: Bounds::new([
                 Coord { x: 0, y: 0 },
                 Coord { x: 100, y: 0 },
                 Coord { x: 100, y: 30 },
                 Coord { x: 0, y: 30 },
-            ],
+            ]),
             angle: None,
             text: Some("First".into()),
             box_score: 0.9,

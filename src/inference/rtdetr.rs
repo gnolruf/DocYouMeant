@@ -5,6 +5,7 @@ use once_cell::sync::OnceCell;
 use ort::{inputs, session::Session, value::Value};
 use std::sync::Mutex;
 
+use crate::document::bounds::Bounds;
 use crate::document::table::TableCell;
 use crate::document::{LayoutBox, LayoutClass};
 use crate::inference::error::InferenceError;
@@ -321,7 +322,7 @@ impl RtDetr {
                     .into_iter()
                     .filter_map(|(points, class_id, confidence)| {
                         LayoutClass::from_id(class_id).map(|class| LayoutBox {
-                            bounds: points,
+                            bounds: Bounds::new(points),
                             class,
                             confidence,
                         })
@@ -332,7 +333,9 @@ impl RtDetr {
             RtDetrMode::WiredTableCell | RtDetrMode::WirelessTableCell => {
                 let table_cells: Vec<TableCell> = filtered_tuples
                     .into_iter()
-                    .map(|(points, _class_id, confidence)| TableCell::new(points, confidence))
+                    .map(|(points, _class_id, confidence)| {
+                        TableCell::new(Bounds::new(points), confidence)
+                    })
                     .collect();
                 Ok(RtDetrResult::TableCells(table_cells))
             }

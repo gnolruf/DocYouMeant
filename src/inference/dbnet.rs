@@ -10,6 +10,7 @@ use once_cell::sync::OnceCell;
 use ort::{inputs, session::Session, value::Value};
 use std::sync::Mutex;
 
+use crate::document::bounds::Bounds;
 use crate::document::TextBox;
 use crate::inference::error::InferenceError;
 use crate::utils::{box_utils, image_utils};
@@ -314,7 +315,7 @@ impl DBNet {
             );
 
             rs_boxes.push(TextBox {
-                bounds: int_clip_min_boxes,
+                bounds: Bounds::new(int_clip_min_boxes),
                 angle: None,
                 text: None,
                 box_score,

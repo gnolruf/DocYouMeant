@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use docyoumeant::document::bounds::Bounds;
 use docyoumeant::document::content::{DocumentType, PageContent};
 use docyoumeant::document::layout_box::{LayoutBox, LayoutClass};
 use docyoumeant::document::region::{DocumentRegion, DocumentRegionBuilder, RegionRole};
@@ -199,13 +200,13 @@ fn test_layout_class_from_id_invalid() {
 
 #[test]
 fn test_document_region_new() {
-    let bounds = vec![
+    let bounds = Bounds::new([
         Coord { x: 0, y: 0 },
         Coord { x: 100, y: 0 },
         Coord { x: 100, y: 50 },
         Coord { x: 0, y: 50 },
-    ];
-    let region = DocumentRegion::new(RegionRole::Title, 1, bounds.clone(), "Test Title".into());
+    ]);
+    let region = DocumentRegion::new(RegionRole::Title, 1, bounds, "Test Title".into());
 
     assert_eq!(region.role, RegionRole::Title);
     assert_eq!(region.page_number, 1);
@@ -216,7 +217,12 @@ fn test_document_region_new() {
 
 #[test]
 fn test_document_region_with_confidence() {
-    let bounds = vec![Coord { x: 0, y: 0 }];
+    let bounds = Bounds::new([
+        Coord { x: 0, y: 0 },
+        Coord { x: 1, y: 0 },
+        Coord { x: 1, y: 1 },
+        Coord { x: 0, y: 1 },
+    ]);
     let region = DocumentRegion::new(RegionRole::PageFooter, 2, bounds, "Footer".into())
         .with_confidence(0.95);
 
@@ -237,12 +243,12 @@ fn create_text_box(
     text_score: f32,
 ) -> TextBox {
     TextBox {
-        bounds: [
+        bounds: Bounds::new([
             Coord { x, y },
             Coord { x: x + w, y },
             Coord { x: x + w, y: y + h },
             Coord { x, y: y + h },
-        ],
+        ]),
         angle: None,
         text: text.map(String::from),
         box_score,
@@ -260,12 +266,12 @@ fn create_layout_box(
     confidence: f32,
 ) -> LayoutBox {
     LayoutBox {
-        bounds: [
+        bounds: Bounds::new([
             Coord { x, y },
             Coord { x: x + w, y },
             Coord { x: x + w, y: y + h },
             Coord { x, y: y + h },
-        ],
+        ]),
         class,
         confidence,
     }
@@ -525,9 +531,10 @@ fn test_analysis_result_add_page() {
 fn test_analysis_result_add_regions() {
     let mut result = AnalysisResult::new("test", "text");
 
+    let dummy_bounds = Bounds::new([Coord { x: 0, y: 0 }; 4]);
     let regions = vec![
-        DocumentRegion::new(RegionRole::Title, 1, vec![], "Title".into()),
-        DocumentRegion::new(RegionRole::PageFooter, 1, vec![], "Footer".into()),
+        DocumentRegion::new(RegionRole::Title, 1, dummy_bounds, "Title".into()),
+        DocumentRegion::new(RegionRole::PageFooter, 1, dummy_bounds, "Footer".into()),
     ];
     result.add_regions(regions);
 
@@ -613,7 +620,7 @@ fn test_to_analyze_result_with_regions() {
     page.regions = vec![DocumentRegion::new(
         RegionRole::Title,
         1,
-        vec![],
+        Bounds::new([Coord { x: 0, y: 0 }; 4]),
         "Title".into(),
     )];
 
@@ -648,12 +655,12 @@ fn test_to_analyze_result_metadata_document_type() {
 #[test]
 fn test_text_box_with_all_fields() {
     let text_box = TextBox {
-        bounds: [
+        bounds: Bounds::new([
             Coord { x: 0, y: 0 },
             Coord { x: 100, y: 0 },
             Coord { x: 100, y: 50 },
             Coord { x: 0, y: 50 },
-        ],
+        ]),
         angle: Some(Orientation::Oriented0),
         text: Some("Hello World".into()),
         box_score: 0.95,
@@ -672,7 +679,7 @@ fn test_text_box_with_all_fields() {
 #[test]
 fn test_text_box_minimal() {
     let text_box = TextBox {
-        bounds: [Coord { x: 0, y: 0 }; 4],
+        bounds: Bounds::new([Coord { x: 0, y: 0 }; 4]),
         angle: None,
         text: None,
         box_score: 0.0,
@@ -692,12 +699,12 @@ fn test_text_box_minimal() {
 #[test]
 fn test_layout_box_creation() {
     let layout_box = LayoutBox {
-        bounds: [
+        bounds: Bounds::new([
             Coord { x: 10, y: 20 },
             Coord { x: 110, y: 20 },
             Coord { x: 110, y: 70 },
             Coord { x: 10, y: 70 },
-        ],
+        ]),
         class: LayoutClass::Table,
         confidence: 0.87,
     };
@@ -752,7 +759,7 @@ fn test_page_content_has_regions() {
     page.regions = vec![DocumentRegion::new(
         RegionRole::Title,
         1,
-        vec![],
+        Bounds::new([Coord { x: 0, y: 0 }; 4]),
         "Title".into(),
     )];
 

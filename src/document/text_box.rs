@@ -1,7 +1,7 @@
 pub use geo::Coord;
 use serde::{Deserialize, Serialize};
 
-use crate::utils::serialization_utils::coord_array_i32;
+use crate::document::bounds::Bounds;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocumentSpan {
@@ -57,8 +57,7 @@ impl Orientation {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextBox {
-    #[serde(with = "coord_array_i32")]
-    pub bounds: [Coord<i32>; 4],
+    pub bounds: Bounds,
     pub angle: Option<Orientation>,
     pub text: Option<String>,
     pub box_score: f32,

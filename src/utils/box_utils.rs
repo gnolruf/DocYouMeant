@@ -1,3 +1,6 @@
+//! Utility functions for bounding box operations.
+
+use crate::document::bounds::Bounds;
 use geo::{Area, BooleanOps, Coord, LineString, Polygon};
 use geo_clipper::Clipper;
 use image::{GrayImage, ImageBuffer, Luma};
@@ -5,6 +8,24 @@ use imageproc::drawing::draw_polygon_mut;
 use imageproc::point::Point as ImageProcPoint;
 use ndarray::Array2;
 
+/// Calculates the Intersection over Union (IoU) between two polygons.
+///
+/// IoU is a measure of overlap between two bounding boxes, commonly used
+/// in object detection to evaluate prediction accuracy or for non-maximum
+/// suppression.
+///
+/// # Arguments
+///
+/// * `points1` - Slice of coordinates defining the first polygon's vertices
+/// * `points2` - Slice of coordinates defining the second polygon's vertices
+///
+/// # Returns
+///
+/// A value between 0.0 and 1.0 where:
+/// - 0.0 indicates no overlap
+/// - 1.0 indicates perfect overlap
+///
+/// Returns 0.0 if either polygon has zero area.
 #[inline]
 pub fn calculate_iou(points1: &[Coord<i32>], points2: &[Coord<i32>]) -> f32 {
     let poly1 = Polygon::new(
@@ -41,6 +62,20 @@ pub fn calculate_iou(points1: &[Coord<i32>], points2: &[Coord<i32>]) -> f32 {
     }
 }
 
+/// Calculates the overlap ratio of the first polygon covered by the second polygon.
+///
+/// Unlike IoU, this function measures how much of `poly1` is covered by `poly2`,
+/// which is useful for determining if a smaller box is contained within a larger one.
+///
+/// # Arguments
+///
+/// * `poly1` - Slice of coordinates defining the first polygon (the reference polygon)
+/// * `poly2` - Slice of coordinates defining the second polygon
+///
+/// # Returns
+///
+/// A value between 0.0 and 1.0 representing the fraction of `poly1`'s area
+/// that overlaps with `poly2`. Returns 0.0 if `poly1` has zero area.
 #[inline]
 pub fn calculate_overlap(poly1: &[Coord<i32>], poly2: &[Coord<i32>]) -> f32 {
     let polygon1 = Polygon::new(
@@ -70,6 +105,35 @@ pub fn calculate_overlap(poly1: &[Coord<i32>], poly2: &[Coord<i32>]) -> f32 {
     (intersection_area / poly1_area) as f32
 }
 
+/// Applies Non-Maximum Suppression (NMS) to filter overlapping detections.
+///
+/// NMS is a post-processing technique used in object detection to remove
+/// redundant overlapping bounding boxes, keeping only the most confident
+/// detection for each object.
+///
+/// # Algorithm
+///
+/// 1. Sort detections by confidence score in descending order
+/// 2. For each detection (starting from highest confidence):
+///    - Keep the detection if not suppressed
+///    - Suppress all lower-confidence detections of the same class
+///      that have IoU above the threshold
+///
+/// # Arguments
+///
+/// * `detections` - Vector of tuples containing:
+///   - `[Coord<i32>; 4]`: Four corner points of the bounding box
+///   - `usize`: Class label/index
+///   - `f32`: Confidence score
+/// * `nms_threshold` - IoU threshold above which overlapping boxes are suppressed
+///
+/// # Returns
+///
+/// Filtered vector of detections with redundant boxes removed.
+///
+/// # Note
+///
+/// Only boxes with the same class label are compared for suppression.
 pub fn apply_nms(
     mut detections: Vec<([Coord<i32>; 4], usize, f32)>,
     nms_threshold: f32,
@@ -105,6 +169,27 @@ pub fn apply_nms(
     keep
 }
 
+/// Expands a bounding box outward by a ratio proportional to its perimeter.
+///
+/// This function is commonly used in text detection to expand tight text boxes
+/// to ensure complete text coverage, compensating for the shrinkage applied
+/// during label generation in training.
+///
+/// # Arguments
+///
+/// * `box_points` - Four corner points of the original bounding box
+/// * `unclip_ratio` - Expansion ratio (typically 1.5-2.0 for text detection)
+///
+/// # Returns
+///
+/// * `Ok(Vec<Coord<i32>>)` - Expanded polygon vertices
+/// * `Err` - If the polygon offset operation fails
+///
+/// # Algorithm
+///
+/// The expansion distance is calculated as: `area * unclip_ratio / perimeter`
+///
+/// This ensures that boxes with different aspect ratios expand proportionally.
 pub fn unclip_box(
     box_points: &[Coord<i32>; 4],
     unclip_ratio: f32,
@@ -154,6 +239,27 @@ pub fn unclip_box(
     }
 }
 
+/// Reorders corner points into a consistent top-left, top-right, bottom-right, bottom-left order.
+///
+/// This function normalizes the ordering of quadrilateral vertices to ensure
+/// consistent processing regardless of the original point order. It also
+/// calculates the maximum side length of the box.
+///
+/// # Arguments
+///
+/// * `corner_points` - Four corner points in arbitrary order
+///
+/// # Returns
+///
+/// A tuple containing:
+/// - `[Coord<i32>; 4]`: Points reordered as [top-left, top-right, bottom-right, bottom-left]
+/// - `f32`: Maximum side length of the box
+///
+/// # Ordering Algorithm
+///
+/// 1. Sort points by x-coordinate
+/// 2. Assign left two points (index1, index4) based on y-coordinate
+/// 3. Assign right two points (index2, index3) based on y-coordinate
 #[inline]
 pub fn get_min_boxes(corner_points: &[Coord<i32>; 4]) -> ([Coord<i32>; 4], f32) {
     let dx1 = (corner_points[1].x - corner_points[0].x) as f32;
@@ -198,6 +304,30 @@ pub fn get_min_boxes(corner_points: &[Coord<i32>; 4]) -> ([Coord<i32>; 4], f32) 
     (min_box, max_side_len)
 }
 
+/// Calculates the average prediction score within a bounding box region.
+///
+/// This function computes the mean value of a prediction map (typically a
+/// probability/confidence map) within the area defined by a bounding box.
+/// It uses a polygon mask to accurately include only pixels inside the box.
+///
+/// # Arguments
+///
+/// * `boxes` - Four corner points defining the bounding box
+/// * `pred` - 2D array of prediction values (e.g., text probability map)
+///
+/// # Returns
+///
+/// * `Ok(f32)` - Average prediction value within the box (0.0 to 1.0 for probability maps)
+/// * `Err` - If an error occurs during processing
+///
+/// Returns 0.0 if the prediction array is empty or no pixels fall within the box.
+///
+/// # Algorithm
+///
+/// 1. Compute the axis-aligned bounding rectangle of the box
+/// 2. Create a binary mask by rasterizing the polygon
+/// 3. Sum prediction values where the mask is non-zero
+/// 4. Return the average
 pub fn box_score(
     boxes: &[Coord<i32>; 4],
     pred: &Array2<f32>,
@@ -260,45 +390,37 @@ pub fn box_score(
     }
 }
 
-/// Helper struct to store bounding box metrics for efficient spatial comparisons
-#[derive(Debug, Clone, Copy)]
-#[allow(dead_code)]
-struct BoxMetrics {
-    center_x: i32,
-    center_y: i32,
-    top: i32,
-    bottom: i32,
-    left: i32,
-    right: i32,
-    height: i32,
-    width: i32,
-}
-
-impl BoxMetrics {
-    fn from_bounds(bounds: &[Coord<i32>]) -> Self {
-        let top = bounds.iter().map(|c| c.y).min().unwrap_or(0);
-        let bottom = bounds.iter().map(|c| c.y).max().unwrap_or(0);
-        let left = bounds.iter().map(|c| c.x).min().unwrap_or(0);
-        let right = bounds.iter().map(|c| c.x).max().unwrap_or(0);
-
-        let height = (bottom - top).max(1);
-        let width = (right - left).max(1);
-        let center_x = (left + right) / 2;
-        let center_y = (top + bottom) / 2;
-
-        Self {
-            center_x,
-            center_y,
-            top,
-            bottom,
-            left,
-            right,
-            height,
-            width,
-        }
-    }
-}
-
+/// Determines the natural reading order of bounding boxes using a graph-based approach.
+///
+/// This function establishes a partial ordering of text boxes based on their
+/// spatial relationships, then performs a topological sort to produce a linear
+/// reading sequence that respects the natural left-to-right, top-to-bottom
+/// reading flow.
+///
+/// # Type Parameters
+///
+/// * `T` - Any type implementing the [`HasBounds`] trait
+///
+/// # Arguments
+///
+/// * `boxes` - Slice of items with bounding box information
+///
+/// # Returns
+///
+/// A vector of 1-indexed positions indicating the reading order.
+/// For example, `[2, 1, 3]` means the second box should be read first,
+/// then the first box, then the third box.
+///
+/// # Algorithm
+///
+/// 1. Build a directed graph where edge (i, j) means box i should be read before box j
+/// 2. Edges are added based on spatial relationships (above/left-of)
+/// 3. Topological sort using Kahn's algorithm with tie-breaking by position
+/// 4. Handle cycles by appending remaining nodes in spatial order
+///
+/// # Note
+///
+/// Returns 1-indexed positions to match common document labeling conventions.
 pub fn graph_based_reading_order<T>(boxes: &[T]) -> Vec<usize>
 where
     T: HasBounds,
@@ -309,10 +431,7 @@ where
 
     let n = boxes.len();
 
-    let metrics: Vec<BoxMetrics> = boxes
-        .iter()
-        .map(|b| BoxMetrics::from_bounds(b.get_bounds()))
-        .collect();
+    let bounds_list: Vec<&Bounds> = boxes.iter().map(|b| b.get_bounds()).collect();
 
     let mut graph: Vec<Vec<usize>> = vec![Vec::new(); n];
     let mut in_degree: Vec<usize> = vec![0; n];
@@ -323,7 +442,7 @@ where
                 continue;
             }
 
-            if should_come_before_metrics(&metrics[i], &metrics[j]) {
+            if should_come_before(bounds_list[i], bounds_list[j]) {
                 graph[i].push(j);
                 in_degree[j] += 1;
             }
@@ -341,11 +460,11 @@ where
     }
 
     queue.sort_by(|&a, &b| {
-        let metrics_a = &metrics[a];
-        let metrics_b = &metrics[b];
+        let bounds_a = bounds_list[a];
+        let bounds_b = bounds_list[b];
 
-        match metrics_a.center_y.cmp(&metrics_b.center_y) {
-            std::cmp::Ordering::Equal => metrics_a.center_x.cmp(&metrics_b.center_x),
+        match bounds_a.center_y().cmp(&bounds_b.center_y()) {
+            std::cmp::Ordering::Equal => bounds_a.center_x().cmp(&bounds_b.center_x()),
             other => other,
         }
     });
@@ -359,11 +478,11 @@ where
                 queue.push(neighbor);
 
                 queue.sort_by(|&a, &b| {
-                    let metrics_a = &metrics[a];
-                    let metrics_b = &metrics[b];
+                    let bounds_a = bounds_list[a];
+                    let bounds_b = bounds_list[b];
 
-                    match metrics_a.center_y.cmp(&metrics_b.center_y) {
-                        std::cmp::Ordering::Equal => metrics_a.center_x.cmp(&metrics_b.center_x),
+                    match bounds_a.center_y().cmp(&bounds_b.center_y()) {
+                        std::cmp::Ordering::Equal => bounds_a.center_x().cmp(&bounds_b.center_x()),
                         other => other,
                     }
                 });
@@ -374,11 +493,11 @@ where
     if result.len() < n {
         let mut remaining: Vec<usize> = (0..n).filter(|i| !result.contains(i)).collect();
         remaining.sort_by(|&a, &b| {
-            let metrics_a = &metrics[a];
-            let metrics_b = &metrics[b];
+            let bounds_a = bounds_list[a];
+            let bounds_b = bounds_list[b];
 
-            match metrics_a.center_y.cmp(&metrics_b.center_y) {
-                std::cmp::Ordering::Equal => metrics_a.center_x.cmp(&metrics_b.center_x),
+            match bounds_a.center_y().cmp(&bounds_b.center_y()) {
+                std::cmp::Ordering::Equal => bounds_a.center_x().cmp(&bounds_b.center_x()),
                 other => other,
             }
         });
@@ -388,14 +507,50 @@ where
     result.into_iter().map(|i| i + 1).collect()
 }
 
+/// Trait for types that have bounding box coordinates.
+///
+/// Implement this trait for any type that has spatial bounds to enable
+/// use with [`graph_based_reading_order`] and other spatial algorithms.
+///
+/// # Example
+///
+/// ```ignore
+/// use crate::document::bounds::Bounds;
+///
+/// struct TextBox {
+///     text: String,
+///     bounds: Bounds,
+/// }
+///
+/// impl HasBounds for TextBox {
+///     fn get_bounds(&self) -> &Bounds {
+///         &self.bounds
+///     }
+/// }
+/// ```
 pub trait HasBounds {
-    fn get_bounds(&self) -> &[Coord<i32>];
+    /// Returns a reference to the Bounds.
+    fn get_bounds(&self) -> &Bounds;
 }
 
-fn should_come_before_metrics(metrics_i: &BoxMetrics, metrics_j: &BoxMetrics) -> bool {
-    let avg_height = (metrics_i.height + metrics_j.height) / 2;
+/// Determines if one box should be read before another based on spatial position.
+///
+/// This function implements the heuristics for establishing reading order:
+/// - A box clearly above another comes first
+/// - For boxes on roughly the same line, the leftmost comes first
+///
+/// # Arguments
+///
+/// * `bounds_i` - Bounds for the first box
+/// * `bounds_j` - Bounds for the second box
+///
+/// # Returns
+///
+/// `true` if box i should be read before box j, `false` otherwise.
+fn should_come_before(bounds_i: &Bounds, bounds_j: &Bounds) -> bool {
+    let avg_height = (bounds_i.height() + bounds_j.height()) / 2;
 
-    let vertical_separation = metrics_j.center_y - metrics_i.center_y;
+    let vertical_separation = bounds_j.center_y() - bounds_i.center_y();
 
     if vertical_separation > (avg_height as f32 * 0.3) as i32 {
         return true;
@@ -403,8 +558,8 @@ fn should_come_before_metrics(metrics_i: &BoxMetrics, metrics_j: &BoxMetrics) ->
 
     let vertical_threshold = (avg_height as f32 * 0.5) as i32;
     if vertical_separation.abs() <= vertical_threshold
-        && metrics_i.center_x < metrics_j.center_x
-        && metrics_i.right <= metrics_j.left + (avg_height / 4)
+        && bounds_i.center_x() < bounds_j.center_x()
+        && bounds_i.right() <= bounds_j.left() + (avg_height / 4)
     {
         return true;
     }

@@ -491,7 +491,11 @@ impl AnalysisPipeline {
             let mut text_count = 0;
 
             for embedded_word in embedded_words {
-                if box_utils::calculate_overlap(&embedded_word.bounds, &text_line.bounds) > 0.75 {
+                if box_utils::calculate_overlap(
+                    embedded_word.bounds.as_slice(),
+                    text_line.bounds.as_slice(),
+                ) > 0.75
+                {
                     if let Some(ref text) = embedded_word.text {
                         matched_texts.push(text.clone());
                         total_confidence += embedded_word.text_score;

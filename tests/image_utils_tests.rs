@@ -1,3 +1,4 @@
+use docyoumeant::document::bounds::Bounds;
 use docyoumeant::document::text_box::{Orientation, TextBox};
 use docyoumeant::utils::image_utils::{
     add_image_padding, get_image_parts, get_rotate_crop_image, rotate_image,
@@ -422,12 +423,12 @@ fn test_get_image_parts() {
     }
 
     let text_box = TextBox {
-        bounds: [
+        bounds: Bounds::new([
             Coord { x: 5, y: 5 },
             Coord { x: 10, y: 5 },
             Coord { x: 10, y: 10 },
             Coord { x: 5, y: 10 },
-        ],
+        ]),
         angle: None,
         text: None,
         box_score: 1.0,
@@ -466,12 +467,12 @@ fn test_get_image_parts_multiple() {
 
     let text_boxes = vec![
         TextBox {
-            bounds: [
+            bounds: Bounds::new([
                 Coord { x: 0, y: 0 },
                 Coord { x: 20, y: 0 },
                 Coord { x: 20, y: 10 },
                 Coord { x: 0, y: 10 },
-            ],
+            ]),
             angle: None,
             text: None,
             box_score: 1.0,
@@ -479,12 +480,12 @@ fn test_get_image_parts_multiple() {
             span: None,
         },
         TextBox {
-            bounds: [
+            bounds: Bounds::new([
                 Coord { x: 30, y: 30 },
                 Coord { x: 80, y: 30 },
                 Coord { x: 80, y: 50 },
                 Coord { x: 30, y: 50 },
-            ],
+            ]),
             angle: None,
             text: None,
             box_score: 1.0,
@@ -507,7 +508,7 @@ fn test_rotate_images_by_angle_no_rotation() {
     img.put_pixel(0, 0, Rgb([255, 0, 0]));
 
     let text_boxes = vec![TextBox {
-        bounds: [Coord { x: 0, y: 0 }; 4],
+        bounds: Bounds::new([Coord { x: 0, y: 0 }; 4]),
         angle: None, // No angle specified
         text: None,
         box_score: 1.0,
@@ -527,7 +528,7 @@ fn test_rotate_images_by_angle_with_rotation() {
     let img: RgbImage = ImageBuffer::new(10, 5);
 
     let text_boxes = vec![TextBox {
-        bounds: [Coord { x: 0, y: 0 }; 4],
+        bounds: Bounds::new([Coord { x: 0, y: 0 }; 4]),
         angle: Some(Orientation::Oriented90),
         text: None,
         box_score: 1.0,
@@ -549,7 +550,7 @@ fn test_rotate_images_by_angle_mixed() {
 
     let text_boxes = vec![
         TextBox {
-            bounds: [Coord { x: 0, y: 0 }; 4],
+            bounds: Bounds::new([Coord { x: 0, y: 0 }; 4]),
             angle: Some(Orientation::Oriented0),
             text: None,
             box_score: 1.0,
@@ -557,7 +558,7 @@ fn test_rotate_images_by_angle_mixed() {
             span: None,
         },
         TextBox {
-            bounds: [Coord { x: 0, y: 0 }; 4],
+            bounds: Bounds::new([Coord { x: 0, y: 0 }; 4]),
             angle: Some(Orientation::Oriented180),
             text: None,
             box_score: 1.0,

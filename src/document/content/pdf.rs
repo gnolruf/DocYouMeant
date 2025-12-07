@@ -1,5 +1,6 @@
 use pdfium_render::prelude::*;
 
+use super::super::bounds::Bounds;
 use super::super::error::DocumentError;
 use super::super::text_box::{Coord, Orientation, TextBox};
 use super::{DocumentContent, PageContent};
@@ -123,14 +124,15 @@ impl PdfContent {
         let scale_factor = dpi / 72.0;
         let page_height = page.height().value;
         for word in &mut words {
-            word.bounds[0].x = (word.bounds[0].x as f32 * scale_factor) as i32;
-            word.bounds[0].y = ((page_height - word.bounds[0].y as f32) * scale_factor) as i32;
-            word.bounds[1].x = (word.bounds[1].x as f32 * scale_factor) as i32;
-            word.bounds[1].y = ((page_height - word.bounds[1].y as f32) * scale_factor) as i32;
-            word.bounds[2].x = (word.bounds[2].x as f32 * scale_factor) as i32;
-            word.bounds[2].y = ((page_height - word.bounds[2].y as f32) * scale_factor) as i32;
-            word.bounds[3].x = (word.bounds[3].x as f32 * scale_factor) as i32;
-            word.bounds[3].y = ((page_height - word.bounds[3].y as f32) * scale_factor) as i32;
+            let coords = word.bounds.coords_mut();
+            coords[0].x = (coords[0].x as f32 * scale_factor) as i32;
+            coords[0].y = ((page_height - coords[0].y as f32) * scale_factor) as i32;
+            coords[1].x = (coords[1].x as f32 * scale_factor) as i32;
+            coords[1].y = ((page_height - coords[1].y as f32) * scale_factor) as i32;
+            coords[2].x = (coords[2].x as f32 * scale_factor) as i32;
+            coords[2].y = ((page_height - coords[2].y as f32) * scale_factor) as i32;
+            coords[3].x = (coords[3].x as f32 * scale_factor) as i32;
+            coords[3].y = ((page_height - coords[3].y as f32) * scale_factor) as i32;
         }
 
         page_content.words = words;
@@ -259,7 +261,7 @@ impl PdfContent {
 
             if seen_words.insert(key) {
                 words.push(TextBox {
-                    bounds: word_bounds,
+                    bounds: Bounds::new(word_bounds),
                     angle: orientation,
                     text: Some(text.to_string()),
                     box_score: 1.0,
