@@ -165,13 +165,21 @@ impl Table {
             })
             .collect();
 
-        let (row_centers, col_centers) = Self::compute_grid_boundaries(&cells);
+        let (row_lines, col_lines) = Self::compute_grid_from_edges(&cells);
 
-        let row_count = row_centers.len();
-        let column_count = col_centers.len();
+        let row_count = if row_lines.len() > 1 {
+            row_lines.len() - 1
+        } else {
+            1
+        };
+        let column_count = if col_lines.len() > 1 {
+            col_lines.len() - 1
+        } else {
+            1
+        };
 
         for cell in &mut cells {
-            Self::assign_cell_position(cell, &row_centers, &col_centers);
+            Self::assign_cell_to_grid(cell, &row_lines, &col_lines);
         }
 
         Self {
@@ -185,34 +193,34 @@ impl Table {
         }
     }
 
-    fn compute_grid_boundaries(cells: &[TableCell]) -> (Vec<i32>, Vec<i32>) {
-        let mut y_centers: Vec<i32> = cells.iter().map(|c| (c.min_y() + c.max_y()) / 2).collect();
+    fn compute_grid_from_edges(cells: &[TableCell]) -> (Vec<i32>, Vec<i32>) {
+        let mut y_edges: Vec<i32> = cells.iter().flat_map(|c| [c.min_y(), c.max_y()]).collect();
 
-        let mut x_centers: Vec<i32> = cells.iter().map(|c| (c.min_x() + c.max_x()) / 2).collect();
+        let mut x_edges: Vec<i32> = cells.iter().flat_map(|c| [c.min_x(), c.max_x()]).collect();
 
-        let row_centers = Self::cluster_boundaries(&mut y_centers);
-        let col_centers = Self::cluster_boundaries(&mut x_centers);
+        let row_lines = Self::cluster_edges(&mut y_edges);
+        let col_lines = Self::cluster_edges(&mut x_edges);
 
-        (row_centers, col_centers)
+        (row_lines, col_lines)
     }
 
-    fn cluster_boundaries(boundaries: &mut [i32]) -> Vec<i32> {
-        if boundaries.is_empty() {
+    fn cluster_edges(edges: &mut [i32]) -> Vec<i32> {
+        if edges.is_empty() {
             return Vec::new();
         }
 
-        boundaries.sort();
+        edges.sort();
 
         let mut clustered = Vec::new();
-        let mut current_cluster: Vec<i32> = vec![boundaries[0]];
+        let mut current_cluster: Vec<i32> = vec![edges[0]];
 
-        for &boundary in boundaries.iter().skip(1) {
-            if boundary - current_cluster.last().unwrap_or(&0) <= Self::CLUSTER_TOLERANCE {
-                current_cluster.push(boundary);
+        for &edge in edges.iter().skip(1) {
+            if edge - current_cluster.last().unwrap_or(&0) <= Self::CLUSTER_TOLERANCE {
+                current_cluster.push(edge);
             } else {
                 let mean = current_cluster.iter().sum::<i32>() / current_cluster.len() as i32;
                 clustered.push(mean);
-                current_cluster = vec![boundary];
+                current_cluster = vec![edge];
             }
         }
 
@@ -224,30 +232,38 @@ impl Table {
         clustered
     }
 
-    fn assign_cell_position(cell: &mut TableCell, row_centers: &[i32], col_centers: &[i32]) {
-        let cell_top = cell.min_y();
-        let cell_left = cell.min_x();
+    fn assign_cell_to_grid(cell: &mut TableCell, row_lines: &[i32], col_lines: &[i32]) {
+        let row_start = Self::find_aligned_line_index(cell.min_y(), row_lines);
+        let row_end = Self::find_aligned_line_index(cell.max_y(), row_lines);
 
-        let row_idx = Self::find_closest_center_index(cell_top, row_centers);
-        let col_idx = Self::find_closest_center_index(cell_left, col_centers);
+        let col_start = Self::find_aligned_line_index(cell.min_x(), col_lines);
+        let col_end = Self::find_aligned_line_index(cell.max_x(), col_lines);
 
-        cell.row_index = row_idx;
-        cell.column_index = col_idx;
+        cell.row_index = row_start;
+        cell.column_index = col_start;
 
-        cell.row_span = Self::calculate_table_span(cell.min_y(), cell.max_y(), row_centers);
-        cell.column_span = Self::calculate_table_span(cell.min_x(), cell.max_x(), col_centers);
+        cell.row_span = if row_end > row_start {
+            row_end - row_start
+        } else {
+            1
+        };
+        cell.column_span = if col_end > col_start {
+            col_end - col_start
+        } else {
+            1
+        };
     }
 
-    fn find_closest_center_index(coord: i32, centers: &[i32]) -> usize {
-        if centers.is_empty() {
+    fn find_aligned_line_index(coord: i32, lines: &[i32]) -> usize {
+        if lines.is_empty() {
             return 0;
         }
 
         let mut min_dist = i32::MAX;
         let mut best_idx = 0;
 
-        for (i, &center) in centers.iter().enumerate() {
-            let dist = (coord - center).abs();
+        for (i, &line) in lines.iter().enumerate() {
+            let dist = (coord - line).abs();
             if dist < min_dist {
                 min_dist = dist;
                 best_idx = i;
@@ -255,15 +271,6 @@ impl Table {
         }
 
         best_idx
-    }
-
-    fn calculate_table_span(min_coord: i32, max_coord: i32, centers: &[i32]) -> usize {
-        let tolerance = Self::CLUSTER_TOLERANCE;
-        let count = centers
-            .iter()
-            .filter(|&&c| c >= min_coord - tolerance && c <= max_coord + tolerance)
-            .count();
-        count.max(1)
     }
 
     pub fn match_words_to_cells(&mut self, words: &[TextBox], overlap_threshold: f32) {
