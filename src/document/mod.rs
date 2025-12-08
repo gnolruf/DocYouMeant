@@ -3,7 +3,6 @@ pub mod bounds;
 pub mod content;
 pub mod error;
 pub mod layout_box;
-pub mod region;
 pub mod table;
 pub mod text_box;
 

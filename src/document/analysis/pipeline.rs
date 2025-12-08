@@ -4,7 +4,6 @@ use tracing::{debug, info, instrument, warn};
 use crate::document::content::{DocumentContent, DocumentType, PageContent};
 use crate::document::error::DocumentError;
 use crate::document::layout_box::{LayoutBox, LayoutClass};
-use crate::document::region::DocumentRegionBuilder;
 use crate::document::table::{Table, TableType};
 use crate::document::text_box::{Orientation, TextBox};
 use crate::inference::tasks::language_detection_task::LanguageDetectionTask;
@@ -91,11 +90,8 @@ impl AnalysisPipeline {
 
                         self.update_page_text(page);
 
-                        let regions = DocumentRegionBuilder::build_regions(
-                            page.page_number,
-                            &layout_boxes,
-                            &text_lines,
-                        );
+                        let regions =
+                            LayoutBox::build_regions(page.page_number, &layout_boxes, &text_lines);
                         page.regions = regions;
                     } else {
                         debug!("Processing PDF as image");
@@ -113,11 +109,8 @@ impl AnalysisPipeline {
 
                         self.update_page_text(page);
 
-                        let regions = DocumentRegionBuilder::build_regions(
-                            page.page_number,
-                            &layout_boxes,
-                            &text_lines,
-                        );
+                        let regions =
+                            LayoutBox::build_regions(page.page_number, &layout_boxes, &text_lines);
                         page.regions = regions;
                     }
                 }
@@ -144,11 +137,8 @@ impl AnalysisPipeline {
 
                     self.update_page_text(page);
 
-                    let regions = DocumentRegionBuilder::build_regions(
-                        page.page_number,
-                        &layout_boxes,
-                        &text_lines,
-                    );
+                    let regions =
+                        LayoutBox::build_regions(page.page_number, &layout_boxes, &text_lines);
                     page.regions = regions;
                 }
 

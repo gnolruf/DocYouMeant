@@ -321,11 +321,8 @@ impl RtDetr {
                 let filtered_detections: Vec<LayoutBox> = filtered_tuples
                     .into_iter()
                     .filter_map(|(points, class_id, confidence)| {
-                        LayoutClass::from_id(class_id).map(|class| LayoutBox {
-                            bounds: Bounds::new(points),
-                            class,
-                            confidence,
-                        })
+                        LayoutClass::from_id(class_id)
+                            .map(|class| LayoutBox::new(Bounds::new(points), class, confidence))
                     })
                     .collect();
                 Ok(RtDetrResult::LayoutBoxes(filtered_detections))

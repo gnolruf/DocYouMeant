@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::document::content::{DocumentContent, DocumentType, PageContent};
-use crate::document::region::DocumentRegion;
+use crate::document::layout_box::LayoutBox;
 use crate::document::table::Table;
 use crate::inference::tasks::question_and_answer_task::QuestionAndAnswerResult;
 
@@ -13,7 +13,7 @@ pub struct AnalysisResult {
     pub content_format: String,
     pub content: String,
     pub pages: Vec<PageContent>,
-    pub regions: Vec<DocumentRegion>,
+    pub regions: Vec<LayoutBox>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tables: Vec<Table>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -51,7 +51,7 @@ impl AnalysisResult {
         self.pages.push(page);
     }
 
-    pub fn add_regions(&mut self, mut regions: Vec<DocumentRegion>) {
+    pub fn add_regions(&mut self, mut regions: Vec<LayoutBox>) {
         self.regions.append(&mut regions);
     }
 

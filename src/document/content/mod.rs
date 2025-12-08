@@ -20,7 +20,6 @@ use ::image::RgbImage;
 use serde::{Deserialize, Serialize};
 
 use crate::document::layout_box::LayoutBox;
-use crate::document::region::DocumentRegion;
 use crate::document::table::Table;
 use crate::document::text_box::{Orientation, TextBox};
 use crate::inference::tasks::question_and_answer_task::QuestionAndAnswerResult;
@@ -114,9 +113,9 @@ pub struct PageContent {
     /// Layout boxes found on this page (used internally, not serialized in final output)
     #[serde(skip)]
     pub layout_boxes: Vec<LayoutBox>,
-    /// Page regions (used internally for page-level analysis, not serialized in final output)
+    /// Page regions (layout boxes that are regions of interest, with content populated)
     #[serde(skip)]
-    pub regions: Vec<DocumentRegion>,
+    pub regions: Vec<LayoutBox>,
     /// Tables detected on this page
     pub tables: Vec<Table>,
     /// Raw text content for this page

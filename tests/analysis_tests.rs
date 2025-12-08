@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use docyoumeant::document::bounds::Bounds;
 use docyoumeant::document::content::{DocumentType, PageContent};
 use docyoumeant::document::layout_box::{LayoutBox, LayoutClass};
-use docyoumeant::document::region::{DocumentRegion, DocumentRegionBuilder, RegionRole};
 use docyoumeant::document::text_box::{DocumentSpan, Orientation, TextBox};
 use docyoumeant::document::{to_analyze_result, AnalysisResult};
 use geo::Coord;
@@ -195,42 +194,39 @@ fn test_layout_class_from_id_invalid() {
 }
 
 // ============================================================================
-// DocumentRegion Tests
+// LayoutBox Region Tests
 // ============================================================================
 
 #[test]
-fn test_document_region_new() {
+fn test_layout_box_new() {
     let bounds = Bounds::new([
         Coord { x: 0, y: 0 },
         Coord { x: 100, y: 0 },
         Coord { x: 100, y: 50 },
         Coord { x: 0, y: 50 },
     ]);
-    let region = DocumentRegion::new(RegionRole::Title, 1, bounds, "Test Title".into());
+    let region = LayoutBox::new(bounds, LayoutClass::DocTitle, 0.95)
+        .with_page_number(1)
+        .with_content("Test Title".into());
 
-    assert_eq!(region.role, RegionRole::Title);
-    assert_eq!(region.page_number, 1);
+    assert_eq!(region.class, LayoutClass::DocTitle);
+    assert_eq!(region.page_number, Some(1));
     assert_eq!(region.bounds, bounds);
-    assert_eq!(region.content, "Test Title");
-    assert!(region.confidence.is_none());
+    assert_eq!(region.content, Some("Test Title".into()));
 }
 
 #[test]
-fn test_document_region_with_confidence() {
-    let bounds = Bounds::new([
-        Coord { x: 0, y: 0 },
-        Coord { x: 1, y: 0 },
-        Coord { x: 1, y: 1 },
-        Coord { x: 0, y: 1 },
-    ]);
-    let region = DocumentRegion::new(RegionRole::PageFooter, 2, bounds, "Footer".into())
-        .with_confidence(0.95);
-
-    assert_eq!(region.confidence, Some(0.95));
+fn test_layout_box_is_region() {
+    assert!(LayoutClass::DocTitle.is_region());
+    assert!(LayoutClass::Header.is_region());
+    assert!(LayoutClass::Footer.is_region());
+    assert!(LayoutClass::Number.is_region());
+    assert!(!LayoutClass::Text.is_region());
+    assert!(!LayoutClass::Image.is_region());
 }
 
 // ============================================================================
-// DocumentRegionBuilder Tests
+// LayoutBox::build_regions Tests
 // ============================================================================
 
 fn create_text_box(
@@ -265,8 +261,8 @@ fn create_layout_box(
     class: LayoutClass,
     confidence: f32,
 ) -> LayoutBox {
-    LayoutBox {
-        bounds: Bounds::new([
+    LayoutBox::new(
+        Bounds::new([
             Coord { x, y },
             Coord { x: x + w, y },
             Coord { x: x + w, y: y + h },
@@ -274,7 +270,7 @@ fn create_layout_box(
         ]),
         class,
         confidence,
-    }
+    )
 }
 
 #[test]
@@ -282,7 +278,7 @@ fn test_build_regions_empty() {
     let layout_boxes: Vec<LayoutBox> = vec![];
     let text_boxes: Vec<TextBox> = vec![];
 
-    let regions = DocumentRegionBuilder::build_regions(1, &layout_boxes, &text_boxes);
+    let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
     assert!(regions.is_empty());
 }
 
@@ -303,7 +299,7 @@ fn test_build_regions_no_matching_layout() {
         0.9,
     )];
 
-    let regions = DocumentRegionBuilder::build_regions(1, &layout_boxes, &text_boxes);
+    let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
     assert!(regions.is_empty());
 }
 
@@ -327,12 +323,12 @@ fn test_build_regions_title() {
         0.88,
     )];
 
-    let regions = DocumentRegionBuilder::build_regions(1, &layout_boxes, &text_boxes);
+    let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
 
     assert_eq!(regions.len(), 1);
-    assert_eq!(regions[0].role, RegionRole::Title);
-    assert_eq!(regions[0].content, "Document Title");
-    assert_eq!(regions[0].page_number, 1);
+    assert_eq!(regions[0].class, LayoutClass::DocTitle);
+    assert_eq!(regions[0].content, Some("Document Title".into()));
+    assert_eq!(regions[0].page_number, Some(1));
 }
 
 #[test]
@@ -348,10 +344,10 @@ fn test_build_regions_footer() {
         0.8,
     )];
 
-    let regions = DocumentRegionBuilder::build_regions(1, &layout_boxes, &text_boxes);
+    let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
 
     assert_eq!(regions.len(), 1);
-    assert_eq!(regions[0].role, RegionRole::PageFooter);
+    assert_eq!(regions[0].class, LayoutClass::Footer);
 }
 
 #[test]
@@ -367,10 +363,10 @@ fn test_build_regions_header() {
         0.85,
     )];
 
-    let regions = DocumentRegionBuilder::build_regions(1, &layout_boxes, &text_boxes);
+    let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
 
     assert_eq!(regions.len(), 1);
-    assert_eq!(regions[0].role, RegionRole::PageHeader);
+    assert_eq!(regions[0].class, LayoutClass::Header);
 }
 
 #[test]
@@ -385,11 +381,11 @@ fn test_build_regions_page_number() {
     )];
     let text_boxes = vec![create_text_box(280, 950, 40, 20, Some("42"), 0.95, 0.92)];
 
-    let regions = DocumentRegionBuilder::build_regions(1, &layout_boxes, &text_boxes);
+    let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
 
     assert_eq!(regions.len(), 1);
-    assert_eq!(regions[0].role, RegionRole::PageNumber);
-    assert_eq!(regions[0].content, "42");
+    assert_eq!(regions[0].class, LayoutClass::Number);
+    assert_eq!(regions[0].content, Some("42".into()));
 }
 
 #[test]
@@ -412,10 +408,10 @@ fn test_build_regions_footnote() {
         0.88,
     )];
 
-    let regions = DocumentRegionBuilder::build_regions(1, &layout_boxes, &text_boxes);
+    let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
 
     assert_eq!(regions.len(), 1);
-    assert_eq!(regions[0].role, RegionRole::PageFooter);
+    assert_eq!(regions[0].class, LayoutClass::Footnote);
 }
 
 #[test]
@@ -428,12 +424,13 @@ fn test_build_regions_multiple_text_boxes_combined() {
         create_text_box(200, 0, 100, 50, Some("Title"), 0.92, 0.9),
     ];
 
-    let regions = DocumentRegionBuilder::build_regions(1, &layout_boxes, &text_boxes);
+    let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
 
     assert_eq!(regions.len(), 1);
-    assert!(regions[0].content.contains("Hello"));
-    assert!(regions[0].content.contains("World"));
-    assert!(regions[0].content.contains("Title"));
+    let content = regions[0].content.as_ref().unwrap();
+    assert!(content.contains("Hello"));
+    assert!(content.contains("World"));
+    assert!(content.contains("Title"));
 }
 
 #[test]
@@ -445,7 +442,7 @@ fn test_build_regions_text_box_not_overlapping() {
         create_text_box(500, 500, 100, 50, Some("Distant Text"), 0.9, 0.85),
     ];
 
-    let regions = DocumentRegionBuilder::build_regions(1, &layout_boxes, &text_boxes);
+    let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
 
     // No regions because text box doesn't overlap
     assert!(regions.is_empty());
@@ -466,15 +463,15 @@ fn test_build_regions_mixed_layout_types() {
         create_text_box(0, 920, 600, 30, Some("Confidential"), 0.82, 0.8),
     ];
 
-    let regions = DocumentRegionBuilder::build_regions(1, &layout_boxes, &text_boxes);
+    let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
 
     // Should have header, title, and footer (Text class doesn't create regions)
     assert_eq!(regions.len(), 3);
 
-    let roles: Vec<_> = regions.iter().map(|r| &r.role).collect();
-    assert!(roles.contains(&&RegionRole::PageHeader));
-    assert!(roles.contains(&&RegionRole::Title));
-    assert!(roles.contains(&&RegionRole::PageFooter));
+    let classes: Vec<_> = regions.iter().map(|r| r.class).collect();
+    assert!(classes.contains(&LayoutClass::Header));
+    assert!(classes.contains(&LayoutClass::DocTitle));
+    assert!(classes.contains(&LayoutClass::Footer));
 }
 
 // ============================================================================
@@ -533,8 +530,12 @@ fn test_analysis_result_add_regions() {
 
     let dummy_bounds = Bounds::new([Coord { x: 0, y: 0 }; 4]);
     let regions = vec![
-        DocumentRegion::new(RegionRole::Title, 1, dummy_bounds, "Title".into()),
-        DocumentRegion::new(RegionRole::PageFooter, 1, dummy_bounds, "Footer".into()),
+        LayoutBox::new(dummy_bounds, LayoutClass::DocTitle, 0.9)
+            .with_page_number(1)
+            .with_content("Title".into()),
+        LayoutBox::new(dummy_bounds, LayoutClass::Footer, 0.85)
+            .with_page_number(1)
+            .with_content("Footer".into()),
     ];
     result.add_regions(regions);
 
@@ -617,12 +618,13 @@ fn test_to_analyze_result_with_detected_language() {
 #[test]
 fn test_to_analyze_result_with_regions() {
     let mut page = PageContent::new(1);
-    page.regions = vec![DocumentRegion::new(
-        RegionRole::Title,
-        1,
+    page.regions = vec![LayoutBox::new(
         Bounds::new([Coord { x: 0, y: 0 }; 4]),
-        "Title".into(),
-    )];
+        LayoutClass::DocTitle,
+        0.9,
+    )
+    .with_page_number(1)
+    .with_content("Title".into())];
 
     let content = MockDocumentContent {
         text: None,
@@ -698,39 +700,21 @@ fn test_text_box_minimal() {
 
 #[test]
 fn test_layout_box_creation() {
-    let layout_box = LayoutBox {
-        bounds: Bounds::new([
+    let layout_box = LayoutBox::new(
+        Bounds::new([
             Coord { x: 10, y: 20 },
             Coord { x: 110, y: 20 },
             Coord { x: 110, y: 70 },
             Coord { x: 10, y: 70 },
         ]),
-        class: LayoutClass::Table,
-        confidence: 0.87,
-    };
+        LayoutClass::Table,
+        0.87,
+    );
 
     assert_eq!(layout_box.class, LayoutClass::Table);
     assert!((layout_box.confidence - 0.87).abs() < 1e-6);
-}
-
-// ============================================================================
-// RegionRole Tests
-// ============================================================================
-
-#[test]
-fn test_region_role_variants() {
-    // Ensure all variants can be created
-    let roles = [
-        RegionRole::Title,
-        RegionRole::SectionHeading,
-        RegionRole::Footnote,
-        RegionRole::PageHeader,
-        RegionRole::PageFooter,
-        RegionRole::PageNumber,
-        RegionRole::Unknown,
-    ];
-
-    assert_eq!(roles.len(), 7);
+    assert!(layout_box.page_number.is_none());
+    assert!(layout_box.content.is_none());
 }
 
 // ============================================================================
@@ -756,12 +740,13 @@ fn test_page_content_has_regions() {
 
     assert!(!page.has_regions());
 
-    page.regions = vec![DocumentRegion::new(
-        RegionRole::Title,
-        1,
+    page.regions = vec![LayoutBox::new(
         Bounds::new([Coord { x: 0, y: 0 }; 4]),
-        "Title".into(),
-    )];
+        LayoutClass::DocTitle,
+        0.9,
+    )
+    .with_page_number(1)
+    .with_content("Title".into())];
 
     assert!(page.has_regions());
 }
