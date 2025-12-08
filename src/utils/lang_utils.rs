@@ -1,20 +1,50 @@
+//! Utility functions for language configurations.
+
 use std::collections::HashMap;
 use std::fs;
 
 use lingua::{Language, LanguageDetector, LanguageDetectorBuilder};
 use serde::{Deserialize, Serialize};
 
+/// Configuration for a language's OCR model and dictionary.
+///
+/// This struct holds the necessary file paths and metadata for loading
+/// language-specific OCR recognition models.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LanguageConfig {
+    /// The human-readable name of the language (e.g., "english", "chinese").
     pub name: String,
+    /// Path to the ONNX model file for text recognition.
     pub model_file: String,
+    /// Path to the dictionary file containing valid characters for the language.
     pub dict_file: String,
+    /// Whether this is a script-based model (covers multiple languages using the same script).
     pub is_script_model: bool,
 }
 
+/// Utility struct for language detection and configuration management.
+///
+/// Provides static methods for:
+/// - Loading language configurations from JSON files
+/// - Detecting languages from text using the Lingua library
+/// - Mapping between internal language names and Lingua's `Language` enum
 pub struct LangUtils;
 
 impl LangUtils {
+    /// Retrieves the configuration for a specific language.
+    ///
+    /// Looks up the language configuration from the JSON config file. If the config file
+    /// cannot be read and the requested language is "english", returns a default English
+    /// configuration as a fallback.
+    ///
+    /// # Arguments
+    ///
+    /// * `language` - The name of the language to look up (e.g., "english", "chinese").
+    ///
+    /// # Returns
+    ///
+    /// * `Some(LanguageConfig)` - The configuration for the requested language if found.
+    /// * `None` - If the language is not supported or not found in the configuration.
     pub fn get_language_config(language: &str) -> Option<LanguageConfig> {
         match Self::get_all_language_configs(false) {
             Ok(configs) => configs.get(language).cloned(),
@@ -33,6 +63,26 @@ impl LangUtils {
         }
     }
 
+    /// Retrieves all available language configurations.
+    ///
+    /// Loads and parses the language configurations from `models/ocr_lang_models.json`.
+    /// Optionally filters to return only script-based models.
+    ///
+    /// # Arguments
+    ///
+    /// * `script_models_only` - If `true`, returns only configurations where `is_script_model` is `true`.
+    ///   Script models cover multiple languages that share the same writing system.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(HashMap<String, LanguageConfig>)` - A map of language names to their configurations.
+    /// * `Err` - If the config file cannot be read or parsed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The config file at `models/ocr_lang_models.json` cannot be read.
+    /// - The JSON content cannot be deserialized into the expected format.
     pub fn get_all_language_configs(
         script_models_only: bool,
     ) -> Result<HashMap<String, LanguageConfig>, Box<dyn std::error::Error>> {
@@ -50,6 +100,27 @@ impl LangUtils {
         }
     }
 
+    /// Detects the most likely language from a collection of text samples.
+    ///
+    /// Uses the Lingua library to perform statistical language detection on the combined
+    /// text samples, constrained to a set of candidate languages. This improves accuracy
+    /// by limiting the detection scope to plausible languages.
+    ///
+    /// # Arguments
+    ///
+    /// * `texts` - A slice of text strings to analyze. These are concatenated for detection.
+    /// * `candidate_languages` - A slice of language names to consider (e.g., `["english", "german", "french"]`).
+    ///
+    /// # Returns
+    ///
+    /// * `Some(String)` - The detected language name if detection succeeds.
+    /// * `None` - If `texts` or `candidate_languages` is empty.
+    ///
+    /// # Notes
+    ///
+    /// - If none of the candidate languages can be mapped to Lingua's supported languages,
+    ///   the first candidate language is returned as a fallback.
+    /// - If Lingua cannot confidently detect a language, the first candidate is returned.
     pub fn detect_language(texts: &[String], candidate_languages: &[String]) -> Option<String> {
         if texts.is_empty() || candidate_languages.is_empty() {
             return None;
@@ -76,6 +147,19 @@ impl LangUtils {
             .or_else(|| candidate_languages.first().cloned())
     }
 
+    /// Maps an internal language name to a Lingua `Language` enum variant.
+    ///
+    /// Performs case-insensitive matching of language names to their corresponding
+    /// Lingua enum values. Supports common aliases (e.g., "norwegian" maps to `Bokmal`).
+    ///
+    /// # Arguments
+    ///
+    /// * `language` - The language name to map (case-insensitive).
+    ///
+    /// # Returns
+    ///
+    /// * `Some(Language)` - The corresponding Lingua `Language` enum variant.
+    /// * `None` - If the language name is not recognized or not supported by Lingua.
     pub fn map_to_lingua_language(language: &str) -> Option<Language> {
         match language.to_lowercase().as_str() {
             // A
@@ -181,6 +265,23 @@ impl LangUtils {
         }
     }
 
+    /// Maps a Lingua `Language` enum variant back to an internal language name string.
+    ///
+    /// This is the inverse operation of [`map_to_lingua_language`]. Converts Lingua's
+    /// detected language back to the lowercase string format used internally.
+    ///
+    /// # Arguments
+    ///
+    /// * `language` - The Lingua `Language` enum variant to convert.
+    ///
+    /// # Returns
+    ///
+    /// A lowercase string representation of the language (e.g., `Language::English` → `"english"`).
+    ///
+    /// # Note
+    ///
+    /// This function handles all Lingua language variants. The returned string matches
+    /// the keys used in the language configuration files.
     pub fn map_from_lingua_language(language: Language) -> String {
         match language {
             // A

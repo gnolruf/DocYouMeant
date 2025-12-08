@@ -1,9 +1,28 @@
+//! Utility functions for image processing operations.
+
 use image::{imageops, ImageBuffer, Rgb, RgbImage};
 use imageproc::geometric_transformations::{warp, Interpolation, Projection};
 use ndarray::{Array, Array4};
 
 use crate::{document::text_box::Orientation, document::text_box::TextBox};
 
+/// Adds padding around an image with a white background.
+///
+/// Creates a new image with the specified padding added to each side,
+/// filling the padded areas with white pixels (RGB 255, 255, 255).
+///
+/// # Arguments
+///
+/// * `image` - The source RGB image to add padding to.
+/// * `padding_top` - The number of pixels to add to the top edge.
+/// * `padding_bottom` - The number of pixels to add to the bottom edge.
+/// * `padding_left` - The number of pixels to add to the left edge.
+/// * `padding_right` - The number of pixels to add to the right edge.
+///
+/// # Returns
+///
+/// A new [`RgbImage`] with the original image centered and surrounded by white padding.
+/// If all padding values are zero, returns a clone of the original image.
 pub fn add_image_padding(
     image: &RgbImage,
     padding_top: u32,
@@ -36,6 +55,33 @@ pub fn add_image_padding(
     padded_img
 }
 
+/// Extracts and perspective-corrects a quadrilateral region from an image.
+///
+/// Given four corner points defining a quadrilateral in the source image,
+/// this function crops the bounding box, applies a perspective transformation
+/// to rectify the region, and returns the corrected image.
+///
+/// # Arguments
+///
+/// * `src` - The source RGB image to extract the region from.
+/// * `box_points` - A slice of exactly 4 `(i32, i32)` points representing the
+///   corners of the quadrilateral in clockwise order starting from top-left:
+///   `[top-left, top-right, bottom-right, bottom-left]`.
+///
+/// # Returns
+///
+/// Returns `Ok((image, is_vertical))` where:
+/// * `image` - The perspective-corrected [`RgbImage`] of the extracted region.
+/// * `is_vertical` - `true` if the output height is at least 1.5x the width,
+///   indicating vertical text orientation.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// * `box_points` does not contain exactly 4 points.
+/// * The bounding box has zero width or height.
+/// * The output dimensions would be zero.
+/// * The perspective transformation cannot be computed from the given points.
 pub fn get_rotate_crop_image(
     src: &RgbImage,
     box_points: &[(i32, i32)],
@@ -135,6 +181,24 @@ pub fn get_rotate_crop_image(
     Ok((output_img, is_vertical))
 }
 
+/// Rotates an image based on the specified orientation.
+///
+/// Applies a rotation transformation to correct for detected text orientation.
+/// The rotation is applied counter-clockwise to bring the text to standard
+/// horizontal orientation.
+///
+/// # Arguments
+///
+/// * `img` - The RGB image to rotate.
+/// * `angle_type` - The [`Orientation`] indicating the detected rotation of the content.
+///
+/// # Returns
+///
+/// A new [`RgbImage`] rotated to correct the orientation:
+/// * [`Orientation::Oriented0`] - No rotation (returns a clone).
+/// * [`Orientation::Oriented90`] - Rotates 270° (content was rotated 90° clockwise).
+/// * [`Orientation::Oriented180`] - Rotates 180°.
+/// * [`Orientation::Oriented270`] - Rotates 90° (content was rotated 270° clockwise).
 pub fn rotate_image(img: &RgbImage, angle_type: Orientation) -> RgbImage {
     match angle_type {
         Orientation::Oriented0 => img.clone(),
@@ -144,6 +208,27 @@ pub fn rotate_image(img: &RgbImage, angle_type: Orientation) -> RgbImage {
     }
 }
 
+/// Rotates multiple images according to their corresponding text box orientations.
+///
+/// Processes a batch of images, rotating each one based on the detected angle
+/// stored in its associated [`TextBox`]. Images without a detected angle are
+/// cloned without rotation.
+///
+/// # Arguments
+///
+/// * `part_images` - A slice of RGB images to rotate.
+/// * `text_boxes` - A slice of [`TextBox`] structs containing orientation information.
+///   Must have the same length as `part_images`.
+///
+/// # Returns
+///
+/// Returns `Ok(Vec<RgbImage>)` containing the rotated images in the same order
+/// as the input.
+///
+/// # Errors
+///
+/// Currently does not return errors, but the signature allows for future
+/// error handling if needed.
 pub fn rotate_images_by_angle(
     part_images: &[RgbImage],
     text_boxes: &[TextBox],
@@ -163,6 +248,28 @@ pub fn rotate_images_by_angle(
     Ok(rotated_images)
 }
 
+/// Normalizes an image by subtracting mean values and applying normalization factors.
+///
+/// Converts an RGB image to a 4D tensor suitable for neural network inference.
+/// Each pixel channel is normalized using the formula:
+/// `output = (pixel_value * norm) - (mean * norm)`
+///
+/// # Arguments
+///
+/// * `img` - The RGB image to normalize.
+/// * `mean_values` - Array of 3 mean values for each RGB channel.
+/// * `norm_values` - Array of 3 normalization factors for each RGB channel
+///   (typically `1.0 / 255.0` or similar scaling factors).
+///
+/// # Returns
+///
+/// Returns `Ok(Array4<f32>)` with shape `[1, 3, height, width]` in NCHW format
+/// (batch, channels, height, width), suitable for ONNX model inference.
+///
+/// # Errors
+///
+/// Currently does not return errors, but the signature allows for future
+/// error handling if needed.
 pub fn subtract_mean_normalize(
     img: &RgbImage,
     mean_values: &[f32; 3],
@@ -191,6 +298,27 @@ pub fn subtract_mean_normalize(
     Ok(input)
 }
 
+/// Extracts image regions for each detected text box.
+///
+/// Iterates through a collection of text boxes and extracts the corresponding
+/// perspective-corrected image region from the source image using
+/// [`get_rotate_crop_image`].
+///
+/// # Arguments
+///
+/// * `src` - The source RGB image containing all text regions.
+/// * `text_boxes` - A slice of [`TextBox`] structs, each containing boundary
+///   points that define a quadrilateral text region.
+///
+/// # Returns
+///
+/// Returns `Ok(Vec<RgbImage>)` containing the extracted and perspective-corrected
+/// image for each text box, in the same order as the input `text_boxes`.
+///
+/// # Errors
+///
+/// Returns an error if any text box extraction fails (see [`get_rotate_crop_image`]
+/// for specific error conditions).
 pub fn get_image_parts(
     src: &RgbImage,
     text_boxes: &[TextBox],
