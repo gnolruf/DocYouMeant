@@ -1,3 +1,9 @@
+//! Layout detection types and region building utilities.
+//!
+//! This module provides the [`LayoutBox`] type for representing detected layout regions
+//! in a document, along with the [`LayoutClass`] enum for classifying different types
+//! of document elements such as paragraphs, titles, tables, and images.
+
 use geo::Coord;
 use serde::{Deserialize, Serialize};
 
@@ -5,6 +11,11 @@ use crate::document::bounds::Bounds;
 use crate::document::text_box::{Orientation, TextBox};
 use crate::utils::box_utils;
 
+/// Classification of document layout elements.
+///
+/// Each variant represents a distinct type of content region that can be
+/// detected in a document during layout analysis. The numeric values correspond
+/// to the model's output class IDs.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LayoutClass {
@@ -31,6 +42,15 @@ pub enum LayoutClass {
 }
 
 impl LayoutClass {
+    /// Converts a numeric class ID to the corresponding [`LayoutClass`] variant.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The numeric class ID from model output (0-19).
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(LayoutClass)` if the ID is valid (0-19), or `None` for invalid IDs.
     pub fn from_id(id: usize) -> Option<Self> {
         match id {
             0 => Some(Self::ParagraphTitle),
@@ -57,6 +77,17 @@ impl LayoutClass {
         }
     }
 
+    /// Checks if this layout class represents a text region.
+    ///
+    /// Text regions are layout elements that typically contain standalone text
+    /// content which should be extracted and associated with the layout box.
+    /// These include titles, headers, footers, and other labeled text areas.
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if this class is an applicable region class.
+    ///
+    /// Returns `false` for all other layout classes.
     pub fn is_region(&self) -> bool {
         matches!(
             self,
@@ -71,20 +102,39 @@ impl LayoutClass {
     }
 }
 
+/// A detected layout region within a document page.
+///
+/// `LayoutBox` represents a single detected element in the document's layout,
+/// such as a paragraph, title, table, or image region. Each box contains
+/// spatial bounds, a classification, and an optional extracted text content.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayoutBox {
+    /// The quadrilateral bounding coordinates of the layout region.
     pub bounds: Bounds,
+    /// The classification type of this layout element.
     pub class: LayoutClass,
+    /// Model confidence score for this detection (0.0 to 1.0).
     pub confidence: f32,
-    /// Page number this layout box belongs to (1-indexed)
+    /// Page number this layout box belongs to (1-indexed).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page_number: Option<usize>,
-    /// Text content extracted from overlapping text boxes
+    /// Text content extracted from overlapping text boxes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
 }
 
 impl LayoutBox {
+    /// Creates a new `LayoutBox` with the specified bounds, class, and confidence.
+    ///
+    /// The `page_number` and `content` fields are initialized to `None`.
+    /// Use [`with_page_number`](Self::with_page_number) and [`with_content`](Self::with_content)
+    /// to set these optional fields.
+    ///
+    /// # Arguments
+    ///
+    /// * `bounds` - The quadrilateral bounding coordinates of the layout region.
+    /// * `class` - The classification type of this layout element.
+    /// * `confidence` - Model confidence score (typically 0.0 to 1.0).
     pub fn new(bounds: Bounds, class: LayoutClass, confidence: f32) -> Self {
         Self {
             bounds,
@@ -95,16 +145,65 @@ impl LayoutBox {
         }
     }
 
+    /// Sets the page number for this layout box.
+    ///
+    /// This method consumes the `LayoutBox` and returns it with the page number set,
+    /// enabling method chaining in a builder pattern.
+    ///
+    /// # Arguments
+    ///
+    /// * `page_number` - The 1-indexed page number this layout box belongs to.
+    ///
+    /// # Returns
+    ///
+    /// Returns the modified `LayoutBox` with the page number set.
     pub fn with_page_number(mut self, page_number: usize) -> Self {
         self.page_number = Some(page_number);
         self
     }
 
+    /// Sets the text content for this layout box.
+    ///
+    /// This method consumes the `LayoutBox` and returns it with the content set,
+    /// enabling method chaining in a builder pattern.
+    ///
+    /// # Arguments
+    ///
+    /// * `content` - The extracted text content for this layout region.
+    ///
+    /// # Returns
+    ///
+    /// Returns the modified `LayoutBox` with the content set.
     pub fn with_content(mut self, content: String) -> Self {
         self.content = Some(content);
         self
     }
 
+    /// Builds text regions by combining layout boxes with overlapping text boxes.
+    ///
+    /// This method processes layout boxes that are classified as regions (see
+    /// [`LayoutClass::is_region`]) and associates them with overlapping text boxes
+    /// to extract their text content. Each text box can only be used once.
+    ///
+    /// # Arguments
+    ///
+    /// * `page_number` - The 1-indexed page number to assign to the resulting regions.
+    /// * `layout_boxes` - Slice of detected layout boxes from layout analysis.
+    /// * `text_boxes` - Slice of detected text boxes from OCR.
+    ///
+    /// # Returns
+    ///
+    /// A vector of `LayoutBox` instances representing regions with their extracted
+    /// text content. Only layout boxes where [`LayoutClass::is_region`] returns `true`
+    /// are processed.
+    ///
+    /// # Algorithm
+    ///
+    /// For each region-type layout box:
+    /// 1. Find all text boxes that overlap by more than 50%.
+    /// 2. Mark those text boxes as used (preventing reuse).
+    /// 3. Combine the text and bounds of overlapping text boxes.
+    /// 4. Create a new `LayoutBox` with the combined content.
     pub fn build_regions(
         page_number: usize,
         layout_boxes: &[LayoutBox],
@@ -142,6 +241,24 @@ impl LayoutBox {
         regions
     }
 
+    /// Combines text boxes that overlap with a layout region's bounds.
+    ///
+    /// This internal method finds all text boxes that sufficiently overlap with
+    /// the given layout bounds, marks them as used, and combines their content
+    /// into a single `TextBox`.
+    ///
+    /// # Arguments
+    ///
+    /// * `layout_bounds` - The bounding region to find overlapping text boxes for.
+    /// * `text_boxes` - Slice of all detected text boxes.
+    /// * `used_text_boxes` - Mutable tracking array to mark text boxes as consumed.
+    /// * `overlap_threshold` - Minimum overlap ratio (0.0 to 1.0) required for inclusion.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(TextBox)` containing the combined text and bounds if any
+    /// overlapping text boxes were found, or `None` if no text boxes overlap
+    /// above the threshold.
     fn combine_overlapping_text_boxes(
         layout_bounds: &Bounds,
         text_boxes: &[TextBox],
