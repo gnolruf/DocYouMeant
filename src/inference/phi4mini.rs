@@ -58,6 +58,17 @@ impl Phi4MiniInference {
                 path: model_path.clone(),
                 source,
             })?
+            .with_execution_providers([
+                ort::execution_providers::TensorRTExecutionProvider::default()
+                    .with_device_id(0)
+                    .with_engine_cache(true)
+                    .with_engine_cache_path("/workspaces/DocYouMeant/models/trt_engines")
+                    .with_engine_cache_prefix("docyoumeant_")
+                    .with_max_workspace_size(5 << 30)
+                    .with_fp16(true)
+                    .with_timing_cache(true)
+                    .build(),
+            ])?
             .commit_from_file(&model_path)
             .map_err(|source| InferenceError::ModelFileLoadError {
                 path: model_path,
@@ -149,52 +160,6 @@ impl Phi4MiniInference {
     fn format_chat_template(&self, user_message: &str, system_message: Option<&str>) -> String {
         let system = system_message.unwrap_or("You are a helpful AI assistant.");
         format!("<|system|>{system}<|end|><|user|>{user_message}<|end|><|assistant|>")
-    }
-
-    fn detect_token_loop(tokens: &[i64]) -> Option<usize> {
-        let len = tokens.len();
-
-        if len < 60 {
-            return None;
-        }
-
-        for k in 1..=3 {
-            let required_reps = 10;
-            if len >= required_reps * k {
-                let mut all_match = true;
-                let last_slice = &tokens[len - k..];
-                for i in 1..required_reps {
-                    let prev_slice = &tokens[len - (i + 1) * k..len - i * k];
-                    if last_slice != prev_slice {
-                        all_match = false;
-                        break;
-                    }
-                }
-                if all_match {
-                    return Some(k);
-                }
-            }
-        }
-
-        for k in 10..=100.min(len / 4) {
-            let required_reps = 4;
-            if len >= required_reps * k {
-                let mut all_match = true;
-                let last_slice = &tokens[len - k..];
-                for i in 1..required_reps {
-                    let prev_slice = &tokens[len - (i + 1) * k..len - i * k];
-                    if last_slice != prev_slice {
-                        all_match = false;
-                        break;
-                    }
-                }
-                if all_match {
-                    return Some(k);
-                }
-            }
-        }
-
-        None
     }
 
     pub fn generate(
@@ -469,18 +434,6 @@ impl Phi4MiniInference {
             }
 
             generated_tokens.push(token_id);
-
-            if generated_tokens.len().is_multiple_of(10) {
-                if let Some(pattern_len) = Self::detect_token_loop(&generated_tokens) {
-                    let len = generated_tokens.len();
-                    if pattern_len <= 3 {
-                        generated_tokens.truncate(len - pattern_len * 9);
-                    } else {
-                        generated_tokens.truncate(len - pattern_len * 3);
-                    }
-                    break;
-                }
-            }
 
             let mut new_past_key_values = Vec::with_capacity(64);
             for i in 0..32 {
