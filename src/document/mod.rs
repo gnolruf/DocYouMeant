@@ -1,3 +1,17 @@
+//! Document loading, parsing, and analysis module.
+//!
+//! This module provides the core document processing functionality for DocYouMeant,
+//! including loading various file formats, extracting content, and performing
+//! document analysis with OCR and layout detection.
+//!
+//! # Main Types
+//!
+//! - [`Document`]: The primary entry point for loading and analyzing documents
+//! - [`DocumentType`]: Enum representing supported file formats
+//! - [`DocumentContent`]: Trait for document content implementations
+//! - [`AnalysisPipeline`]: Orchestrates the document analysis workflow
+//! - [`AnalysisResult`]: Contains extracted text, layout, tables, and Q&A results
+
 pub mod analysis;
 pub mod bounds;
 pub mod content;
@@ -14,16 +28,40 @@ pub use text_box::TextBox;
 
 use content::{CsvContent, ExcelContent, PdfContent, TextContent, WordContent};
 
+/// Represents a loaded document that can be analyzed for content extraction.
+///
+/// `Document` is the primary entry point for document processing. It supports
+/// various file formats.
 #[derive(Debug)]
 pub struct Document {
+    /// The type of document (PDF, Word, Image, etc.)
     doc_type: DocumentType,
+    /// The loaded document content, if available
     content: Option<Box<dyn DocumentContent>>,
+    /// Results from question-and-answer analysis
     question_answers:
         Vec<crate::inference::tasks::question_and_answer_task::QuestionAndAnswerResult>,
+    /// Unique identifier for the analysis process
     process_id: String,
 }
 
 impl Document {
+    /// Creates a new `Document` from raw bytes and a filename.
+    ///
+    /// The document type is inferred from the file extension. The content is
+    /// immediately loaded and parsed based on the detected type.
+    ///
+    /// # Arguments
+    ///
+    /// * `bytes` - The raw bytes of the document file
+    /// * `filename` - The filename including extension (used to determine document type)
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(Document)` on success, or a [`DocumentError`] if:
+    /// - The file has no extension
+    /// - The file extension is not supported
+    /// - The content cannot be parsed
     pub fn new(bytes: &[u8], filename: &str) -> Result<Self, DocumentError> {
         let extension = std::path::Path::new(filename)
             .extension()
@@ -57,18 +95,54 @@ impl Document {
         })
     }
 
+    /// Returns a reference to the document type.
     pub fn doc_type(&self) -> &DocumentType {
         &self.doc_type
     }
 
+    /// Returns a reference to the document content, if loaded.
+    ///
+    /// The content provides access to the underlying document data and any
+    /// extracted information such as text, layout boxes, and tables.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(&dyn DocumentContent)` if content is loaded, `None` otherwise.
     pub fn content(&self) -> Option<&dyn DocumentContent> {
         self.content.as_deref()
     }
 
+    /// Returns a mutable reference to the document content, if loaded.
+    ///
+    /// This allows modifying the document content, such as adding extracted
+    /// layout information during analysis.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(&mut dyn DocumentContent)` if content is loaded, `None` otherwise.
     pub fn content_mut(&mut self) -> Option<&mut dyn DocumentContent> {
         self.content.as_deref_mut()
     }
 
+    /// Analyzes the document content using the analysis pipeline.
+    ///
+    /// This method performs document analysis including:
+    /// - Layout detection (for images and PDFs)
+    /// - Text extraction and OCR
+    /// - Table detection and extraction
+    /// - Question answering (if questions are provided)
+    ///
+    /// # Arguments
+    ///
+    /// * `questions` - Optional slice of questions to answer about the document
+    /// * `process_id` - Unique identifier for this analysis process (used for logging/tracking)
+    /// * `language` - Optional language hint for OCR (e.g., "en", "ch", "arabic")
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or a [`DocumentError`] if:
+    /// - The document content is not loaded
+    /// - Analysis fails for any reason
     pub fn analyze(
         &mut self,
         questions: Option<&[String]>,
@@ -98,6 +172,17 @@ impl Document {
         Ok(())
     }
 
+    /// Converts the analyzed document into an [`AnalysisResult`].
+    ///
+    /// This method aggregates all analysis results including extracted text,
+    /// layout information, tables, and question-answer pairs into a single
+    /// result structure suitable for serialization or further processing.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(AnalysisResult)` containing all extracted information,
+    /// or a [`DocumentError::ContentNotLoaded`] if the document content
+    /// is not available.
     pub fn to_analyze_result(&self) -> Result<AnalysisResult, DocumentError> {
         let content = match self.content() {
             Some(content) => content,
