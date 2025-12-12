@@ -1,3 +1,8 @@
+//! Document analysis pipeline for processing various document types.
+//!
+//! This module provides the core analysis pipeline that orchestrates document processing,
+//! including text detection, layout analysis, table extraction, and question answering.
+
 use image::RgbImage;
 use tracing::{debug, info, instrument, warn};
 
@@ -17,6 +22,15 @@ use crate::inference::{
 };
 use crate::utils::{box_utils, image_utils};
 
+/// Result type for image document processing.
+///
+/// Contains the extracted information from processing an image-based document:
+/// - Text lines detected in the document
+/// - Individual words extracted from text recognition
+/// - Layout boxes identifying document regions
+/// - Tables detected and parsed from the document
+/// - Document orientation
+/// - Detected language code
 type ImageProcessingResult = (
     Vec<TextBox>,
     Vec<TextBox>,
@@ -26,6 +40,14 @@ type ImageProcessingResult = (
     String,
 );
 
+/// Result type for PDF document processing with embedded text.
+///
+/// Contains the extracted information from processing a PDF with embedded text:
+/// - Text lines matched from embedded text data
+/// - Layout boxes identifying document regions
+/// - Tables detected and parsed from the document
+/// - Document orientation
+/// - Detected language code
 type PdfProcessingResult = (
     Vec<TextBox>,
     Vec<LayoutBox>,
@@ -34,13 +56,38 @@ type PdfProcessingResult = (
     String,
 );
 
+/// Processing mode that determines the depth of document analysis.
+///
+/// The processing mode controls which analysis steps are performed during
+/// document processing. This allows for optimized performance when full
+/// analysis is not required.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcessMode {
+    /// Full document analysis including layout detection, table extraction,
+    /// and question answering capabilities.
+    ///
+    /// Use this mode when you need complete document understanding.
     General,
+
+    /// Simplified processing focused on text extraction only.
+    ///
+    /// This mode skips layout detection, table extraction, and question
+    /// answering, resulting in faster processing when only the document
+    /// text content is needed.
     Read,
 }
 
 impl From<&str> for ProcessMode {
+    /// Converts a string identifier into a [`ProcessMode`].
+    ///
+    /// # Arguments
+    ///
+    /// * `s` - A string slice representing the desired mode
+    ///
+    /// # Returns
+    ///
+    /// - [`ProcessMode::Read`] if `s` equals "read"
+    /// - [`ProcessMode::General`] for any other value (default)
     fn from(s: &str) -> Self {
         match s {
             "read" => ProcessMode::Read,
@@ -49,13 +96,36 @@ impl From<&str> for ProcessMode {
     }
 }
 
+/// The main document analysis pipeline for processing various document formats.
+///
+/// `AnalysisPipeline` orchestrates the complete document analysis workflow.
 pub struct AnalysisPipeline {
+    /// The type of document being processed (PDF, image, text, etc.)
     document_type: DocumentType,
+    /// The processing mode controlling analysis depth
     process_mode: ProcessMode,
+    /// Cached language for consistent processing across pages.
+    /// Uses `RefCell` to allow language detection results to be cached
+    /// during processing without requiring mutable self.
     language: std::cell::RefCell<Option<String>>,
 }
 
 impl AnalysisPipeline {
+    /// Creates a new analysis pipeline for the specified document type.
+    ///
+    /// # Arguments
+    ///
+    /// * `document_type` - The type of document to be processed
+    /// * `process_id` - A string identifier for the processing mode:
+    ///   - `"read"` for text extraction only
+    ///   - Any other value for full analysis (default)
+    /// * `language` - Optional language code (e.g., "en", "ch", "ar") to use for
+    ///   text recognition. If `None`, the language will be auto-detected.
+    ///
+    /// # Returns
+    ///
+    /// A new `AnalysisPipeline` instance configured for the specified document type
+    /// and processing mode.
     pub fn new(document_type: DocumentType, process_id: String, language: Option<String>) -> Self {
         Self {
             document_type,
@@ -64,6 +134,21 @@ impl AnalysisPipeline {
         }
     }
 
+    /// Processes a single page of a document.
+    ///
+    /// This method performs the complete analysis workflow for one page of a document.
+    ///
+    /// # Arguments
+    ///
+    /// * `page` - Mutable reference to the page content to process. Results are
+    ///   written directly to this structure.
+    /// * `questions` - Slice of questions to answer based on page content.
+    ///   Ignored in Read mode.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` on successful processing
+    /// - `Err(DocumentError)` if any processing step fails
     #[instrument(skip(self, page, questions), fields(page_number = page.page_number))]
     pub fn process_page(
         &self,
@@ -164,6 +249,13 @@ impl AnalysisPipeline {
         Ok(())
     }
 
+    /// Updates the page's combined text content from detected text lines.
+    ///
+    /// Concatenates all text from `text_lines` into a single string.
+    ///
+    /// # Arguments
+    ///
+    /// * `page` - Mutable reference to the page content to update
     fn update_page_text(&self, page: &mut PageContent) {
         let texts: Vec<String> = page
             .text_lines
@@ -177,6 +269,28 @@ impl AnalysisPipeline {
         }
     }
 
+    /// Answers a list of questions based on the page's text content.
+    ///
+    /// Uses the question-answering model to find answers to each question
+    /// within the page's extracted text. Questions that fail to process
+    /// are logged as warnings but don't cause the method to fail.
+    ///
+    /// # Arguments
+    ///
+    /// * `page` - Reference to the page content containing the text to search
+    /// * `questions` - Slice of questions to answer
+    ///
+    /// # Returns
+    ///
+    /// A vector of `QuestionAndAnswerResult` for each successfully processed question.
+    /// Returns an empty vector if:
+    /// - No questions are provided
+    /// - The page has no text content
+    /// - The page text is empty/whitespace only
+    ///
+    /// # Errors
+    ///
+    /// Returns `Ok` even if individual questions fail to process (failures are logged).
     fn answer_questions_for_page(
         &self,
         page: &PageContent,
@@ -217,6 +331,24 @@ impl AnalysisPipeline {
         Ok(results)
     }
 
+    /// Determines the orientation of a document image.
+    ///
+    /// Uses the LCNet model to classify document orientation into one of four
+    /// categories (0°, 90°, 180°, 270°). If an embedded orientation is already
+    /// known (e.g., from PDF metadata), it is returned directly without model inference.
+    ///
+    /// # Arguments
+    ///
+    /// * `image` - The document image to analyze
+    /// * `embedded_orientation` - Optional pre-determined orientation from document metadata
+    ///
+    /// # Returns
+    ///
+    /// The detected or provided [`Orientation`] of the document.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the orientation detection model fails.
     fn get_document_orientation(
         &self,
         image: &RgbImage,
@@ -250,6 +382,23 @@ impl AnalysisPipeline {
             .unwrap_or(Orientation::Oriented0))
     }
 
+    /// Detects text line regions in an image using DBNet.
+    ///
+    /// Identifies rectangular regions containing text and orders them in
+    /// reading order using graph-based analysis.
+    ///
+    /// # Arguments
+    ///
+    /// * `image` - The image to analyze for text regions
+    ///
+    /// # Returns
+    ///
+    /// A vector of [`TextBox`] instances representing detected text regions,
+    /// ordered in natural reading order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if text detection model inference fails.
     fn detect_text_lines(&self, image: &RgbImage) -> Result<Vec<TextBox>, DocumentError> {
         debug!("Starting text detection");
         let text_lines =
@@ -269,6 +418,28 @@ impl AnalysisPipeline {
         Ok(ordered_text_lines)
     }
 
+    /// Detects the document layout structure using RT-DETR.
+    ///
+    /// Identifies different types of content regions in the document, such as:
+    /// - Titles and headers
+    /// - Paragraphs
+    /// - Tables
+    /// - Figures
+    /// - Lists
+    ///
+    /// # Arguments
+    ///
+    /// * `image` - The document image to analyze
+    ///
+    /// # Returns
+    ///
+    /// A vector of [`LayoutBox`] instances representing detected layout regions.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Layout detection model inference fails
+    /// - The model returns an unexpected result type
     fn detect_layout(&self, image: &RgbImage) -> Result<Vec<LayoutBox>, DocumentError> {
         debug!("Starting layout detection");
         let result = RtDetr::run(image, RtDetrMode::Layout)
@@ -285,6 +456,31 @@ impl AnalysisPipeline {
         Ok(layout)
     }
 
+    /// Detects and parses tables from the document image.
+    ///
+    /// This method performs a multi-step table extraction process:
+    ///
+    /// 1. **Filter layout boxes** to find regions classified as tables
+    /// 2. **Crop table regions** from the main image
+    /// 3. **Classify table type** (wired vs wireless)
+    /// 4. **Detect table cells**
+    /// 5. **Construct table structure** with row/column information
+    ///
+    /// # Arguments
+    ///
+    /// * `image` - The full document image
+    /// * `layout_boxes` - Layout detection results to filter for table regions
+    /// * `page_number` - The page number for table metadata
+    ///
+    /// # Returns
+    ///
+    /// A vector of [`Table`] instances representing detected tables.
+    /// Returns an empty vector if no table regions are found in the layout.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if image cropping fails. Individual table cell detection
+    /// failures are logged as warnings but don't cause the method to fail.
     #[instrument(skip(self, image, layout_boxes))]
     fn detect_tables(
         &self,
@@ -359,6 +555,22 @@ impl AnalysisPipeline {
         Ok(tables)
     }
 
+    /// Classifies tables as wired (bordered) or wireless (borderless).
+    ///
+    /// # Arguments
+    ///
+    /// * `table_images` - Cropped images of table regions
+    ///
+    /// # Returns
+    ///
+    /// A vector of [`TableType`] values corresponding to each input image.
+    /// Returns an empty vector if no images are provided.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Table classification model inference fails
+    /// - The model returns an unexpected result type
     fn classify_table_types(
         &self,
         table_images: &[RgbImage],
@@ -378,6 +590,28 @@ impl AnalysisPipeline {
         }
     }
 
+    /// Detects individual cells within a table image.
+    ///
+    /// Uses the appropriate RT-DETR model based on table type:
+    /// - **Wired tables**: Uses the wired table cell detection model
+    /// - **Wireless tables**: Uses the wireless table cell detection model
+    ///
+    /// # Arguments
+    ///
+    /// * `table_image` - Cropped image of the table region
+    /// * `table_box` - The layout box containing the table bounds and confidence
+    /// * `table_type` - Whether the table is wired or wireless
+    /// * `page_number` - The page number for table metadata
+    ///
+    /// # Returns
+    ///
+    /// A [`Table`] instance with detected cells and computed row/column structure.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Cell detection model inference fails
+    /// - The model returns an unexpected result type
     fn detect_table_cells(
         &self,
         table_image: &RgbImage,
@@ -411,6 +645,28 @@ impl AnalysisPipeline {
         ))
     }
 
+    /// Processes a PDF page that contains embedded text data.
+    ///
+    /// This method handles PDFs where text can be extracted directly from the
+    /// document structure rather than requiring OCR.
+    ///
+    /// # Arguments
+    ///
+    /// * `image` - The rendered page image for visual analysis
+    /// * `page` - The page content containing embedded text data in `words`
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing:
+    /// - Text lines with matched embedded text
+    /// - Layout boxes (empty in Read mode)
+    /// - Detected tables with cell content (empty in Read mode)
+    /// - Document orientation
+    /// - Detected language code
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any model inference step fails.
     #[instrument(skip(self, image, page))]
     fn process_pdf_with_embedded_text(
         &self,
@@ -474,6 +730,24 @@ impl AnalysisPipeline {
         ))
     }
 
+    /// Matches embedded text words to detected text line regions.
+    ///
+    /// For each detected text line, finds embedded words that spatially overlap
+    /// with the line region (>75% overlap) and concatenates them to form the
+    /// line's text content.
+    ///
+    /// # Arguments
+    ///
+    /// * `text_lines` - Mutable slice of text line regions to populate with text
+    /// * `embedded_words` - Word-level text boxes from embedded PDF data
+    ///
+    /// # Side Effects
+    ///
+    /// Updates each text line in place with:
+    /// - `text`: Concatenated words separated by spaces
+    /// - `text_score`: Average confidence of matched words
+    /// - `span`: Document span for the text content
+    /// - `angle`: Set to `Oriented0` if not already set
     fn match_embedded_text_to_lines(&self, text_lines: &mut [TextBox], embedded_words: &[TextBox]) {
         let mut current_offset = 0;
         for text_line in text_lines.iter_mut() {
@@ -513,6 +787,32 @@ impl AnalysisPipeline {
         }
     }
 
+    /// Processes an image-based document using full OCR pipeline.
+    ///
+    /// This method handles documents where text must be extracted through OCR,
+    /// including scanned PDFs and image files.
+    ///
+    /// # Arguments
+    ///
+    /// * `image` - The document image to process
+    /// * `page_number` - The page number for metadata
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing:
+    /// - Text lines with recognized text
+    /// - Individual words from text recognition
+    /// - Layout boxes (empty in Read mode)
+    /// - Detected tables with cell content (empty in Read mode)
+    /// - Document orientation
+    /// - Detected language code
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any processing step fails, including:
+    /// - Model inference failures
+    /// - Image cropping/rotation errors
+    /// - Text recognition failures
     #[instrument(skip(self, image))]
     fn process_image_document(
         &self,
@@ -616,6 +916,28 @@ impl AnalysisPipeline {
         ))
     }
 
+    /// Analyzes an entire document, processing all pages.
+    ///
+    /// This is the main entry point for document analysis. It iterates through
+    /// all pages in the document, processes each one, and collects question
+    /// answering results.
+    ///
+    /// # Arguments
+    ///
+    /// * `content` - Mutable reference to the document content to analyze.
+    ///   Results are written directly to the page structures.
+    /// * `questions` - Slice of questions to answer based on document content.
+    ///   The same questions are asked for each page.
+    ///
+    /// # Returns
+    ///
+    /// A vector containing all `QuestionAndAnswerResult` instances from all pages.
+    /// Results are returned in page order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if processing any page fails. Pages are processed
+    /// sequentially, so an error on one page stops processing of subsequent pages.
     #[instrument(skip(self, content, questions))]
     pub fn analyze(
         &self,
