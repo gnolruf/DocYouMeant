@@ -80,9 +80,6 @@ pub struct AnalysisResult {
 impl AnalysisResult {
     /// Creates a new empty analysis result.
     ///
-    /// Initializes an `AnalysisResult` with the given identifiers and empty
-    /// collections for pages, regions, tables, and question answers.
-    ///
     /// # Arguments
     ///
     /// * `process_id` - A unique identifier for this processing request
@@ -111,8 +108,6 @@ impl AnalysisResult {
 
     /// Sets the metadata for this result, consuming and returning `self`.
     ///
-    /// This is a builder-style method for fluent construction of `AnalysisResult`.
-    ///
     /// # Arguments
     ///
     /// * `metadata` - A map of metadata key-value pairs
@@ -126,8 +121,6 @@ impl AnalysisResult {
     }
 
     /// Sets the text content for this result, consuming and returning `self`.
-    ///
-    /// This is a builder-style method for fluent construction of `AnalysisResult`.
     ///
     /// # Arguments
     ///

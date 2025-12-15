@@ -59,21 +59,14 @@ type PdfProcessingResult = (
 /// Processing mode that determines the depth of document analysis.
 ///
 /// The processing mode controls which analysis steps are performed during
-/// document processing. This allows for optimized performance when full
-/// analysis is not required.
+/// document processing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcessMode {
     /// Full document analysis including layout detection, table extraction,
     /// and question answering capabilities.
-    ///
-    /// Use this mode when you need complete document understanding.
     General,
 
     /// Simplified processing focused on text extraction only.
-    ///
-    /// This mode skips layout detection, table extraction, and question
-    /// answering, resulting in faster processing when only the document
-    /// text content is needed.
     Read,
 }
 
@@ -96,7 +89,7 @@ impl From<&str> for ProcessMode {
     }
 }
 
-/// The main document analysis pipeline for processing various document formats.
+/// The main document analysis pipeline.
 ///
 /// `AnalysisPipeline` orchestrates the complete document analysis workflow.
 pub struct AnalysisPipeline {
@@ -105,8 +98,6 @@ pub struct AnalysisPipeline {
     /// The processing mode controlling analysis depth
     process_mode: ProcessMode,
     /// Cached language for consistent processing across pages.
-    /// Uses `RefCell` to allow language detection results to be cached
-    /// during processing without requiring mutable self.
     language: std::cell::RefCell<Option<String>>,
 }
 
@@ -116,11 +107,9 @@ impl AnalysisPipeline {
     /// # Arguments
     ///
     /// * `document_type` - The type of document to be processed
-    /// * `process_id` - A string identifier for the processing mode:
-    ///   - `"read"` for text extraction only
-    ///   - Any other value for full analysis (default)
-    /// * `language` - Optional language code (e.g., "en", "ch", "ar") to use for
-    ///   text recognition. If `None`, the language will be auto-detected.
+    /// * `process_id` - A string identifier for the processing mode
+    /// * `language` - Optional language code to use for text recognition.
+    ///   If none provided, the language will be auto-detected.
     ///
     /// # Returns
     ///
@@ -135,8 +124,6 @@ impl AnalysisPipeline {
     }
 
     /// Processes a single page of a document.
-    ///
-    /// This method performs the complete analysis workflow for one page of a document.
     ///
     /// # Arguments
     ///
@@ -333,8 +320,8 @@ impl AnalysisPipeline {
 
     /// Determines the orientation of a document image.
     ///
-    /// Uses the LCNet model to classify document orientation into one of four
-    /// categories (0°, 90°, 180°, 270°). If an embedded orientation is already
+    /// Uses the document orientation classification model to infer one of four
+    /// categories (0 degrees, 90 degrees, 180 degrees, 270 degrees). If an embedded orientation is already
     /// known (e.g., from PDF metadata), it is returned directly without model inference.
     ///
     /// # Arguments
@@ -382,7 +369,7 @@ impl AnalysisPipeline {
             .unwrap_or(Orientation::Oriented0))
     }
 
-    /// Detects text line regions in an image using DBNet.
+    /// Detects text line regions in a document image.
     ///
     /// Identifies rectangular regions containing text and orders them in
     /// reading order using graph-based analysis.
@@ -418,14 +405,7 @@ impl AnalysisPipeline {
         Ok(ordered_text_lines)
     }
 
-    /// Detects the document layout structure using RT-DETR.
-    ///
-    /// Identifies different types of content regions in the document, such as:
-    /// - Titles and headers
-    /// - Paragraphs
-    /// - Tables
-    /// - Figures
-    /// - Lists
+    /// Detects the document layout structure.
     ///
     /// # Arguments
     ///
@@ -458,14 +438,6 @@ impl AnalysisPipeline {
 
     /// Detects and parses tables from the document image.
     ///
-    /// This method performs a multi-step table extraction process:
-    ///
-    /// 1. **Filter layout boxes** to find regions classified as tables
-    /// 2. **Crop table regions** from the main image
-    /// 3. **Classify table type** (wired vs wireless)
-    /// 4. **Detect table cells**
-    /// 5. **Construct table structure** with row/column information
-    ///
     /// # Arguments
     ///
     /// * `image` - The full document image
@@ -490,7 +462,6 @@ impl AnalysisPipeline {
     ) -> Result<Vec<Table>, DocumentError> {
         debug!("Starting table detection");
 
-        // Filter layout boxes to only include tables
         let table_boxes: Vec<&LayoutBox> = layout_boxes
             .iter()
             .filter(|lb| lb.class == LayoutClass::Table)
@@ -591,10 +562,6 @@ impl AnalysisPipeline {
     }
 
     /// Detects individual cells within a table image.
-    ///
-    /// Uses the appropriate RT-DETR model based on table type:
-    /// - **Wired tables**: Uses the wired table cell detection model
-    /// - **Wireless tables**: Uses the wireless table cell detection model
     ///
     /// # Arguments
     ///
