@@ -1,16 +1,6 @@
 //! Language detection task.
 //!
 //! This module provides automatic language detection capabilities for documents.
-//! It supports two detection methods:
-//!
-//! 1. **Image-based detection**: Samples text regions from a document image and
-//!    runs OCR with multiple language models to determine which produces the
-//!    highest confidence results.
-//!
-//! 2. **Text-based detection**: Analyzes already-extracted text to identify
-//!    the language using character and word frequency analysis.
-//!
-//! # Architecture
 //!
 //! Language detection works by:
 //! 1. Sampling up to [`MAX_SAMPLE_LINES`] text regions from the document
