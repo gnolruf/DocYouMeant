@@ -1,3 +1,10 @@
+//! Phi-4-mini-instruct language model for text generation.
+//!
+//! This module provides text generation capabilities using Microsoft's Phi-4-mini-instruct
+//! model, a compact but powerful language model optimized for instruction following.
+//! The model can be used for various document understanding tasks such as summarization,
+//! question answering, and content extraction.
+
 use half::f16;
 use ndarray::{s, Array2, Array4, ArrayView, Ix3};
 use once_cell::sync::OnceCell;
@@ -13,12 +20,28 @@ use tokenizers::Tokenizer;
 
 use crate::inference::error::InferenceError;
 
-const MAX_LENGTH: usize = 4096; // Max length of the generated text
-const VOCAB_SIZE: usize = 200064; // Phi-4-mini-instruct vocabulary size
+/// Maximum number of tokens to generate in a single response.
+const MAX_LENGTH: usize = 4096;
 
+/// Size of the Phi-4-mini-instruct vocabulary.
+const VOCAB_SIZE: usize = 200064;
+
+/// Singleton instance for the model.
 static PHI4MINI_INSTANCE: OnceCell<Mutex<Phi4MiniInference>> = OnceCell::new();
+/// Singleton instance for the tokenizer.
 static TOKENIZER_INSTANCE: OnceCell<Tokenizer> = OnceCell::new();
 
+/// Phi-4-mini-instruct language model for text generation.
+///
+/// `Phi4MiniInference` wraps an ONNX Runtime session configured for autoregressive
+/// text generation with KV caching for efficient incremental decoding.
+///
+/// # Fields
+///
+/// - `session`: ONNX Runtime session with the loaded model
+/// - `eos_token_id`: Token ID for end-of-sequence (`<|endoftext|>`)
+/// - `end_token_id`: Token ID for assistant turn end (`<|end|>`)
+/// - `use_cuda`: Whether CUDA acceleration is available and enabled
 pub struct Phi4MiniInference {
     session: Session,
     eos_token_id: u32,
@@ -27,6 +50,19 @@ pub struct Phi4MiniInference {
 }
 
 impl Phi4MiniInference {
+    /// Creates a new Phi-4-mini-instruct inference instance.
+    ///
+    /// Loads the ONNX model and tokenizer, automatically selecting between
+    /// GPU (CUDA) and CPU variants based on hardware availability.
+    ///
+    /// # Arguments
+    ///
+    /// * `model_dir` - Path to the models directory containing `phi-4-mini-instruct/`
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Phi4MiniInference)` - Initialized model ready for generation
+    /// * `Err(InferenceError)` - If model files are missing or cannot be loaded
     pub fn new(model_dir: &Path) -> Result<Self, InferenceError> {
         let use_cuda = ort::execution_providers::CUDAExecutionProvider::default()
             .is_available()
@@ -120,6 +156,15 @@ impl Phi4MiniInference {
         })
     }
 
+    /// Pre-initializes the model and tokenizer singletons.
+    ///
+    /// Call this method during application startup to eagerly load the model.
+    /// This can take several seconds depending on hardware and model size.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - Model and tokenizer successfully initialized
+    /// * `Err(InferenceError)` - If initialization fails
     pub fn get_or_init() -> Result<(), InferenceError> {
         PHI4MINI_INSTANCE.get_or_try_init(|| {
             let model_dir = Path::new("models/onnx");
@@ -129,6 +174,15 @@ impl Phi4MiniInference {
         Ok(())
     }
 
+    /// Returns a reference to the shared tokenizer instance.
+    ///
+    /// The tokenizer is loaded lazily on first access and cached for
+    /// subsequent calls.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(&'static Tokenizer)` - Reference to the shared tokenizer
+    /// * `Err(InferenceError)` - If the tokenizer file cannot be loaded
     pub fn get_tokenizer() -> Result<&'static Tokenizer, InferenceError> {
         TOKENIZER_INSTANCE.get_or_try_init(|| {
             let tokenizer_path = "models/tokenizer/phi-4-mini-instruct/tokenizer.json";
@@ -139,6 +193,23 @@ impl Phi4MiniInference {
         })
     }
 
+    /// Executes a function with access to the model instance.
+    ///
+    /// This is the primary way to interact with the model. It handles singleton
+    /// initialization and mutex locking automatically.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `F` - Function type that takes `&mut Phi4MiniInference` and returns `Result<R, InferenceError>`
+    /// * `R` - Return type of the function
+    ///
+    /// # Arguments
+    ///
+    /// * `f` - Function to execute with the model instance
+    ///
+    /// # Returns
+    ///
+    /// The result of the provided function.
     pub fn with_instance<F, R>(f: F) -> Result<R, InferenceError>
     where
         F: FnOnce(&mut Phi4MiniInference) -> Result<R, InferenceError>,
@@ -157,11 +228,40 @@ impl Phi4MiniInference {
         f(&mut model)
     }
 
+    /// Formats a prompt using the Phi-4 chat template.
+    ///
+    /// Wraps the user message in the expected chat format with system and
+    /// user turn markers.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_message` - The user's input prompt
+    /// * `system_message` - Optional system prompt (defaults to generic assistant)
+    ///
+    /// # Returns
+    ///
+    /// Formatted string: `<|system|>{system}<|end|><|user|>{user}<|end|><|assistant|>`
     fn format_chat_template(&self, user_message: &str, system_message: Option<&str>) -> String {
         let system = system_message.unwrap_or("You are a helpful AI assistant.");
         format!("<|system|>{system}<|end|><|user|>{user_message}<|end|><|assistant|>")
     }
 
+    /// Prepares tokenized inputs for model inference.
+    ///
+    /// Formats the prompt using the chat template and tokenizes it to create
+    /// the input tensors required by the model.
+    ///
+    /// # Arguments
+    ///
+    /// * `prompt` - Raw user prompt text
+    /// * `tokenizer` - Tokenizer instance for encoding
+    /// * `system_message` - Optional system prompt
+    ///
+    /// # Returns
+    ///
+    /// A tuple of:
+    /// - `Array2<i64>` - Input IDs tensor of shape (1, seq_len)
+    /// - `Array2<i64>` - Attention mask tensor of shape (1, seq_len)
     fn prepare_inputs(
         &self,
         prompt: &str,
@@ -202,6 +302,15 @@ impl Phi4MiniInference {
         Ok((input_ids, attention_mask))
     }
 
+    /// Initializes empty KV cache tensors for all 32 transformer layers.
+    ///
+    /// Creates 64 tensors (key and value for each layer) with zero sequence length,
+    /// ready to accumulate attention states during generation.
+    ///
+    /// # Returns
+    ///
+    /// Vector of 64 ONNX values representing empty KV caches.
+    /// Shape per tensor: (1, 8, 0, 128) where 8 is the number of attention heads.
     fn init_past_key_values(&self) -> Result<Vec<Value>, InferenceError> {
         let mut past_key_values: Vec<Value> = Vec::with_capacity(64);
         for _ in 0..32 {
@@ -248,6 +357,16 @@ impl Phi4MiniInference {
         Ok(past_key_values)
     }
 
+    /// Creates memory allocation information for ONNX Runtime.
+    ///
+    /// Configures where input/output tensors should be allocated based on
+    /// the available hardware.
+    ///
+    /// # Returns
+    ///
+    /// A tuple of:
+    /// - Output memory info (CUDA or CPU depending on hardware)
+    /// - CPU memory info (always CPU, used for reading logits)
     fn create_memory_info(&self) -> Result<(MemoryInfo, MemoryInfo), InferenceError> {
         let output_mem_info = if self.use_cuda {
             MemoryInfo::new(
@@ -287,6 +406,19 @@ impl Phi4MiniInference {
         Ok((output_mem_info, cpu_mem_info))
     }
 
+    /// Extracts the next token from model logits using greedy decoding.
+    ///
+    /// Takes the argmax over the vocabulary dimension of the last position's
+    /// logits to determine the most likely next token.
+    ///
+    /// # Arguments
+    ///
+    /// * `logits_value` - Output logits tensor from the model
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(i64)` - Token ID of the most likely next token
+    /// * `Err(InferenceError)` - If logits extraction fails
     fn extract_next_token(&self, logits_value: Value) -> Result<i64, InferenceError> {
         if self.use_cuda {
             let logits: ArrayView<f16, _> = logits_value
@@ -331,10 +463,30 @@ impl Phi4MiniInference {
         }
     }
 
+    /// Checks if a token is a stop token that should end generation.
+    ///
+    /// # Arguments
+    ///
+    /// * `token_id` - Token ID to check
+    ///
+    /// # Returns
+    ///
+    /// `true` if the token is either `<|endoftext|>` or `<|end|>`.
     fn is_stop_token(&self, token_id: i64) -> bool {
         token_id == self.eos_token_id as i64 || token_id == self.end_token_id as i64
     }
 
+    /// Decodes a sequence of token IDs back to text.
+    ///
+    /// # Arguments
+    ///
+    /// * `tokens` - Slice of generated token IDs
+    /// * `tokenizer` - Tokenizer for decoding
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(String)` - Decoded text
+    /// * `Err(InferenceError)` - If decoding fails
     fn decode_tokens(
         &self,
         tokens: &[i64],
@@ -349,6 +501,22 @@ impl Phi4MiniInference {
             })
     }
 
+    /// Generates text completion for a given prompt.
+    ///
+    /// Performs autoregressive text generation using the Phi-4-mini-instruct model.
+    /// Generation continues until a stop token is produced or the maximum length
+    /// is reached.
+    ///
+    /// # Arguments
+    ///
+    /// * `prompt` - The user's input prompt
+    /// * `tokenizer` - Tokenizer for encoding/decoding
+    /// * `system_message` - Optional system prompt to guide model behavior
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(String)` - Generated text response
+    /// * `Err(InferenceError)` - If generation fails
     pub fn generate(
         &mut self,
         prompt: &str,

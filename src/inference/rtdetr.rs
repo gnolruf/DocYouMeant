@@ -1,3 +1,13 @@
+//! RT-DETR model for layout detection and table cell detection.
+//!
+//! This module provides object detection capabilities using RT-DETR (Real-Time Detection
+//! Transformer), a transformer-based detector that achieves high accuracy with real-time
+//! performance. It supports three operating modes:
+//!
+//! - **Layout Detection**: Detects document layout elements (paragraphs, images, tables, etc.)
+//! - **Wired Table Cell Detection**: Detects cells in tables with visible borders
+//! - **Wireless Table Cell Detection**: Detects cells in borderless tables
+
 use geo::Coord;
 use image::RgbImage;
 use ndarray::Array2;
@@ -11,10 +21,17 @@ use crate::document::{LayoutBox, LayoutClass};
 use crate::inference::error::InferenceError;
 use crate::utils::{box_utils, image_utils};
 
+/// Singleton instance for layout detection model.
 static LAYOUT_DETECTION_INSTANCE: OnceCell<Mutex<RtDetr>> = OnceCell::new();
+/// Singleton instance for wired (bordered) table cell detection model.
 static WIRED_TABLE_CELL_DETECTION_INSTANCE: OnceCell<Mutex<RtDetr>> = OnceCell::new();
+/// Singleton instance for wireless (borderless) table cell detection model.
 static WIRELESS_TABLE_CELL_DETECTION_INSTANCE: OnceCell<Mutex<RtDetr>> = OnceCell::new();
 
+/// Operating mode for the RT-DETR detector.
+///
+/// Determines which model variant is loaded and what type of detection
+/// is performed. Each mode uses a separate singleton instance and model file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RtDetrMode {
     /// Detects layout elements in a document (paragraphs, images, tables, etc.)
@@ -25,12 +42,34 @@ pub enum RtDetrMode {
     WirelessTableCell,
 }
 
+/// Result type returned by RT-DETR detection.
+///
+/// The variant matches the mode used for inference:
+/// - `Layout` mode returns `LayoutBoxes`
+/// - `WiredTableCell` and `WirelessTableCell` modes return `TableCells`
 #[derive(Debug, Clone)]
 pub enum RtDetrResult {
     LayoutBoxes(Vec<LayoutBox>),
     TableCells(Vec<TableCell>),
 }
 
+/// RT-DETR object detection model for document analysis.
+///
+/// `RtDetr` provides real-time object detection using a transformer-based
+/// architecture. It handles preprocessing, inference, and post-processing
+/// including coordinate rescaling and non-maximum suppression.
+///
+/// # Fields
+///
+/// - `session`: ONNX Runtime session for model inference
+/// - `mean_values`: ImageNet mean values for normalization [R, G, B]
+/// - `norm_values`: Normalization divisors for each channel
+/// - `src_width`, `src_height`: Original input image dimensions
+/// - `input_size`: Model input dimension (800 for layout, 640 for table cells)
+/// - `conf_threshold`: Minimum confidence score to keep a detection (0.5)
+/// - `nms_threshold`: IoU threshold for non-maximum suppression (0.4)
+/// - `scale_x`, `scale_y`: Scaling factors from input to model dimensions
+/// - `mode`: Current operating mode determining detection behavior
 pub struct RtDetr {
     session: Session,
     mean_values: [f32; 3],
@@ -46,13 +85,30 @@ pub struct RtDetr {
 }
 
 impl RtDetr {
+    /// Path to the layout detection model.
     const LAYOUT_DETECTION_MODEL_PATH: &'static str = "models/onnx/layout_detection.onnx";
+    /// Path to the wired table cell detection model.
     const WIRED_TABLE_CELL_DETECTION_MODEL_PATH: &'static str =
         "models/onnx/wired_table_cell_detection.onnx";
+    /// Path to the wireless table cell detection model.
     const WIRELESS_TABLE_CELL_DETECTION_MODEL_PATH: &'static str =
         "models/onnx/wireless_table_cell_detection.onnx";
+    /// Number of threads for ONNX Runtime inter-op parallelism.
     const NUM_THREADS: usize = 4;
 
+    /// Creates a new RT-DETR instance for the specified mode.
+    ///
+    /// Loads the appropriate ONNX model based on the mode and configures
+    /// preprocessing parameters. TensorRT optimization is applied when available.
+    ///
+    /// # Arguments
+    ///
+    /// * `mode` - The detection mode determining which model to load
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(RtDetr)` - Initialized detector ready for inference
+    /// * `Err(InferenceError)` - If the model file cannot be loaded
     pub fn new(mode: RtDetrMode) -> Result<Self, InferenceError> {
         let model_path = match mode {
             RtDetrMode::Layout => Self::LAYOUT_DETECTION_MODEL_PATH,
@@ -107,6 +163,19 @@ impl RtDetr {
         })
     }
 
+    /// Pre-initializes the RT-DETR singleton for the specified mode.
+    ///
+    /// Call this method during application startup to eagerly load models
+    /// rather than waiting for the first detection request.
+    ///
+    /// # Arguments
+    ///
+    /// * `mode` - The detection mode to initialize
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - Model successfully initialized
+    /// * `Err(InferenceError)` - If initialization fails
     pub fn get_or_init(mode: RtDetrMode) -> Result<(), InferenceError> {
         match mode {
             RtDetrMode::Layout => {
@@ -125,6 +194,9 @@ impl RtDetr {
         Ok(())
     }
 
+    /// Returns a reference to the singleton instance for the specified mode.
+    ///
+    /// Initializes the instance if it hasn't been created yet.
     fn instance(mode: RtDetrMode) -> Result<&'static Mutex<RtDetr>, InferenceError> {
         match mode {
             RtDetrMode::Layout => LAYOUT_DETECTION_INSTANCE
@@ -136,6 +208,19 @@ impl RtDetr {
         }
     }
 
+    /// Preprocesses an image for detection.
+    ///
+    /// Resizes the image to the model's expected square input size while
+    /// recording scaling factors for later coordinate transformation.
+    ///
+    /// # Arguments
+    ///
+    /// * `image` - Input RGB image
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(RgbImage)` - Resized image ready for inference
+    /// * `Err(InferenceError)` - If preprocessing fails
     pub fn preprocess(&mut self, image: &RgbImage) -> Result<RgbImage, InferenceError> {
         self.src_width = image.width() as i32;
         self.src_height = image.height() as i32;
@@ -153,6 +238,20 @@ impl RtDetr {
         Ok(resized_img)
     }
 
+    /// Creates the input tensors required by the RT-DETR model.
+    ///
+    /// Prepares three inputs:
+    /// 1. Normalized image tensor
+    /// 2. Original image shape (height, width)
+    /// 3. Scale factors applied during preprocessing
+    ///
+    /// # Arguments
+    ///
+    /// * `image` - Preprocessed image from `preprocess()`
+    ///
+    /// # Returns
+    ///
+    /// A tuple of ONNX Values: (image_input, im_shape_input, scale_factor_input)
     fn create_model_inputs(
         &self,
         image: &RgbImage,
@@ -215,6 +314,20 @@ impl RtDetr {
         ))
     }
 
+    /// Performs detection on a preprocessed image.
+    ///
+    /// Runs the RT-DETR model and post-processes detections including
+    /// confidence thresholding, class validation, coordinate scaling,
+    /// and non-maximum suppression.
+    ///
+    /// # Arguments
+    ///
+    /// * `image` - Preprocessed image from `preprocess()`
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(RtDetrResult)` - Detection results (LayoutBoxes or TableCells)
+    /// * `Err(InferenceError)` - If detection fails
     fn detect(&mut self, image: &RgbImage) -> Result<RtDetrResult, InferenceError> {
         let (image_input, im_shape_input, scale_factor_input) = self.create_model_inputs(image)?;
 
@@ -339,6 +452,23 @@ impl RtDetr {
         }
     }
 
+    /// Detects objects in an image (main entry point).
+    ///
+    /// This is the primary method for RT-DETR detection. It handles singleton
+    /// initialization, preprocessing, inference, and post-processing in a
+    /// single call.
+    ///
+    /// # Arguments
+    ///
+    /// * `image` - Input RGB image to analyze
+    /// * `mode` - Detection mode determining the task and model
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(RtDetrResult)` - Detection results matching the requested mode:
+    ///   - `Layout` → `RtDetrResult::LayoutBoxes`
+    ///   - `WiredTableCell` / `WirelessTableCell` → `RtDetrResult::TableCells`
+    /// * `Err(InferenceError)` - If any step fails
     pub fn run(image: &RgbImage, mode: RtDetrMode) -> Result<RtDetrResult, InferenceError> {
         let instance = Self::instance(mode)?;
         let mut model = instance

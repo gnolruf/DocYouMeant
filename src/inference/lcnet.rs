@@ -1,3 +1,12 @@
+//! LCNet-based classification models for orientation and table type detection.
+//!
+//! This module provides lightweight classification models based on the LCNet architecture
+//! for three distinct tasks:
+//!
+//! - **Text Orientation**: Classifies individual text line images as 0° or 180° rotated
+//! - **Document Orientation**: Classifies full document images (0°, 90°, 180°, or 270°)
+//! - **Table Classification**: Determines if a table has visible borders (wired) or not (wireless)
+
 use image::{imageops, Rgb, RgbImage};
 use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
 use once_cell::sync::OnceCell;
@@ -13,6 +22,10 @@ static TEXT_ORIENTATION_INSTANCE: OnceCell<Mutex<LCNet>> = OnceCell::new();
 static DOCUMENT_ORIENTATION_INSTANCE: OnceCell<Mutex<LCNet>> = OnceCell::new();
 static TABLE_CLASSIFICATION_INSTANCE: OnceCell<Mutex<LCNet>> = OnceCell::new();
 
+/// Operating mode for the LCNet classifier.
+///
+/// Determines which model variant is loaded and what type of classification
+/// is performed. Each mode uses a separate singleton instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LCNetMode {
     /// Classifies the orientation of individual text lines (0° or 180°)
@@ -23,12 +36,36 @@ pub enum LCNetMode {
     TableType,
 }
 
+/// Result type returned by LCNet classification.
+///
+/// The variant matches the mode used for inference:
+/// - `TextOrientation` and `DocumentOrientation` return `Orientations`
+/// - `TableType` returns `TableTypes`
 #[derive(Debug, Clone)]
 pub enum LCNetResult {
     Orientations(Vec<Orientation>),
     TableTypes(Vec<TableType>),
 }
 
+/// Lightweight classification network for orientation and table type detection.
+///
+/// `LCNet` provides fast image classification using efficient CNN architectures.
+/// It supports three operating modes, each with its own model weights and
+/// input preprocessing requirements.
+///
+/// # Fields
+///
+/// - `session`: ONNX Runtime session for model inference
+/// - `mean_values`: Per-channel mean values for normalization (127.5 for all channels)
+/// - `norm_values`: Per-channel normalization divisors
+/// - `dst_height`: Target input height (80 for text, 224 for document/table)
+/// - `dst_width`: Target input width (160 for text, 224 for document/table)
+/// - `mode`: Current operating mode determining the classification task
+///
+/// # Thread Safety
+///
+/// Each mode maintains a separate singleton wrapped in `Mutex`, allowing
+/// thread-safe access while permitting different modes to run concurrently.
 pub struct LCNet {
     session: Session,
     mean_values: [f32; 3],
@@ -39,13 +76,31 @@ pub struct LCNet {
 }
 
 impl LCNet {
+    /// Path to the text orientation classification model.
     const TEXT_ORIENTATION_MODEL_PATH: &'static str =
         "models/onnx/text_orientation_classification.onnx";
+    /// Path to the document orientation classification model.
     const DOCUMENT_ORIENTATION_MODEL_PATH: &'static str =
         "models/onnx/document_orientation_classification.onnx";
+    /// Path to the table type classification model.
     const TABLE_CLASSIFICATION_MODEL_PATH: &'static str = "models/onnx/table_classification.onnx";
+    /// Number of threads for ONNX Runtime inter-op parallelism.
     const NUM_THREADS: usize = 4;
 
+    /// Creates a new LCNet instance for the specified mode.
+    ///
+    /// Loads the appropriate ONNX model based on the mode and configures
+    /// preprocessing parameters. This method is typically called internally
+    /// by the singleton initialization.
+    ///
+    /// # Arguments
+    ///
+    /// * `mode` - The classification mode determining which model to load
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(LCNet)` - Initialized classifier ready for inference
+    /// * `Err(InferenceError)` - If the model file cannot be loaded
     pub fn new(mode: LCNetMode) -> Result<Self, InferenceError> {
         let model_path = match mode {
             LCNetMode::TextOrientation => Self::TEXT_ORIENTATION_MODEL_PATH,
@@ -91,6 +146,19 @@ impl LCNet {
         })
     }
 
+    /// Pre-initializes the LCNet singleton for the specified mode.
+    ///
+    /// Call this method during application startup to eagerly load models
+    /// rather than waiting for the first classification request.
+    ///
+    /// # Arguments
+    ///
+    /// * `mode` - The classification mode to initialize
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - Model successfully initialized
+    /// * `Err(InferenceError)` - If initialization fails
     pub fn get_or_init(mode: LCNetMode) -> Result<(), InferenceError> {
         match mode {
             LCNetMode::TextOrientation => {
@@ -110,6 +178,9 @@ impl LCNet {
         Ok(())
     }
 
+    /// Returns a reference to the singleton instance for the specified mode.
+    ///
+    /// Initializes the instance if it hasn't been created yet.
     fn instance(mode: LCNetMode) -> Result<&'static Mutex<LCNet>, InferenceError> {
         match mode {
             LCNetMode::TextOrientation => TEXT_ORIENTATION_INSTANCE
@@ -121,6 +192,21 @@ impl LCNet {
         }
     }
 
+    /// Applies majority voting to normalize orientation predictions.
+    ///
+    /// When processing multiple text lines from the same document, individual
+    /// classification errors can occur. This method uses majority voting to
+    /// replace each prediction with the most common orientation in its category
+    /// (horizontal vs vertical).
+    ///
+    /// # Arguments
+    ///
+    /// * `angles` - Mutable slice of orientation predictions to normalize
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - Angles successfully normalized
+    /// * `Err(InferenceError)` - (Currently never returns an error)
     fn apply_most_angle(angles: &mut [Orientation]) -> Result<(), InferenceError> {
         if angles.is_empty() {
             return Ok(());
@@ -162,6 +248,20 @@ impl LCNet {
         Ok(())
     }
 
+    /// Infers the orientation of a single image.
+    ///
+    /// Runs the classification model on a preprocessed image and interprets
+    /// the output logits to determine the orientation.
+    ///
+    /// # Arguments
+    ///
+    /// * `src` - Preprocessed RGB image (already resized)
+    /// * `is_vertical` - Whether the original image was vertical (height > 1.5× width)
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Orientation)` - Detected orientation (0°, 90°, 180°, or 270°)
+    /// * `Err(InferenceError)` - If inference fails
     fn infer_angle(
         &mut self,
         src: &RgbImage,
@@ -257,6 +357,19 @@ impl LCNet {
         }
     }
 
+    /// Infers the table type (wired or wireless) for a single image.
+    ///
+    /// Runs the table classification model to determine whether a table
+    /// has visible grid lines/borders.
+    ///
+    /// # Arguments
+    ///
+    /// * `src` - Preprocessed RGB image of the table region
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(TableType)` - Either `Wired` (with borders) or `Wireless` (borderless)
+    /// * `Err(InferenceError)` - If inference fails
     fn infer_table_type(&mut self, src: &RgbImage) -> Result<TableType, InferenceError> {
         let input_array =
             image_utils::subtract_mean_normalize(src, &self.mean_values, &self.norm_values)
@@ -307,6 +420,21 @@ impl LCNet {
         }
     }
 
+    /// Classifies the orientation of multiple images.
+    ///
+    /// Processes a batch of images through the orientation classifier,
+    /// with optional majority voting to smooth out prediction errors.
+    ///
+    /// # Arguments
+    ///
+    /// * `part_imgs` - Slice of RGB images to classify
+    /// * `mode` - Classification mode (TextOrientation or DocumentOrientation)
+    /// * `most_angle` - Whether to apply majority voting after classification
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<Orientation>)` - Orientation for each input image
+    /// * `Err(InferenceError)` - If classification fails
     fn get_angles(
         part_imgs: &[RgbImage],
         mode: LCNetMode,
@@ -367,6 +495,19 @@ impl LCNet {
         Ok(angles)
     }
 
+    /// Classifies the type of multiple table images.
+    ///
+    /// Processes a batch of table region images to determine whether each
+    /// table has visible borders (wired) or not (wireless).
+    ///
+    /// # Arguments
+    ///
+    /// * `table_imgs` - Slice of RGB images of table regions
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<TableType>)` - Classification for each table image
+    /// * `Err(InferenceError)` - If classification fails
     fn get_table_types(table_imgs: &[RgbImage]) -> Result<Vec<TableType>, InferenceError> {
         let instance = Self::instance(LCNetMode::TableType)?;
         let mut model = instance
@@ -417,6 +558,21 @@ impl LCNet {
         Ok(table_types)
     }
 
+    /// Preprocesses an image for classification.
+    ///
+    /// Resizes the image to the model's expected dimensions. For text orientation
+    /// mode, vertical images (height ≥ 1.5× width) are rotated 90° clockwise
+    /// before resizing.
+    ///
+    /// # Arguments
+    ///
+    /// * `src` - Input RGB image
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing:
+    /// - `RgbImage` - Resized (and possibly rotated) image
+    /// - `bool` - Whether the original image was vertical
     fn preprocess(&self, src: &RgbImage) -> Result<(RgbImage, bool), InferenceError> {
         let is_vertical = (src.height() as f32) >= (src.width() as f32) * 1.5;
 
@@ -441,6 +597,22 @@ impl LCNet {
         Ok((resized_img, is_vertical))
     }
 
+    /// Runs classification on a batch of images (main entry point).
+    ///
+    /// This is the primary method for LCNet classification. It handles
+    /// singleton initialization, preprocessing, and inference based on the
+    /// specified mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `imgs` - Slice of RGB images to classify
+    /// * `mode` - Classification mode determining the task
+    /// * `most_angle` - Whether to apply majority voting (only for orientation modes)
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(LCNetResult)` - Classification results matching the requested mode
+    /// * `Err(InferenceError)` - If classification fails
     pub fn run(
         imgs: &[RgbImage],
         mode: LCNetMode,

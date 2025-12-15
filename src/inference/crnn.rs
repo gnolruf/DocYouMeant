@@ -1,3 +1,10 @@
+//! Convolutional Recurrent Neural Network (CRNN) for text recognition.
+//!
+//! This module provides text recognition capabilities using a CRNN architecture
+//! that combines convolutional layers for feature extraction with recurrent layers
+//! for sequence modeling. It supports multiple languages through language-specific
+//! models and dictionaries.
+
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
@@ -11,6 +18,25 @@ use crate::utils::image_utils;
 use crate::utils::lang_utils::LangUtils;
 use geo::Coord;
 
+/// Text recognition engine using CRNN (Convolutional Recurrent Neural Network).
+///
+/// `Crnn` performs optical character recognition (OCR) on cropped text line images.
+/// It uses a CTC (Connectionist Temporal Classification) decoder to convert
+/// the model's output sequence into readable text with word-level bounding boxes.
+///
+/// # Fields
+///
+/// - `session`: ONNX Runtime session for model inference
+/// - `keys`: Character dictionary mapping model outputs to characters
+/// - `mean_values`: Per-channel mean values for image normalization
+/// - `norm_values`: Per-channel normalization divisors
+/// - `dst_height`: Target height for input images (maintains aspect ratio)
+///
+/// # Thread Safety
+///
+/// Unlike other inference modules, `Crnn` is not a singleton. Each language
+/// requires its own instance with the appropriate model and dictionary.
+/// For multi-threaded usage, create separate instances or wrap in `Arc<Mutex<Crnn>>`.
 pub struct Crnn {
     session: Session,
     keys: Vec<String>,
@@ -20,13 +46,38 @@ pub struct Crnn {
 }
 
 impl Crnn {
+    /// Number of threads for ONNX Runtime inter-op parallelism.
     const NUM_THREADS: usize = 4;
 
+    /// Inserts special characters into the character dictionary.
+    ///
+    /// Adds the CTC blank token ("#") at the beginning and a space character
+    /// at the end of the dictionary, as required by the CTC decoding algorithm.
     fn insert_special_characters(keys: &mut Vec<String>) {
         keys.insert(0, "#".to_string());
         keys.push(" ".to_string());
     }
 
+    /// Creates a new CRNN text recognizer for the specified language.
+    ///
+    /// Loads the appropriate ONNX model and character dictionary based on
+    /// the language configuration from `models/ocr_lang_models.json`.
+    ///
+    /// # Arguments
+    ///
+    /// * `language` - Language identifier (e.g., "english", "chinese", "arabic")
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Crnn)` - Initialized recognizer ready for inference
+    /// * `Err(InferenceError)` - If the language is unsupported or model files cannot be loaded
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The specified language is not supported
+    /// - The model file cannot be loaded
+    /// - The dictionary file cannot be read or parsed
     pub fn new(language: &str) -> Result<Self, InferenceError> {
         let config = LangUtils::get_language_config(language).ok_or_else(|| {
             InferenceError::ModelFileLoadError {
@@ -72,6 +123,22 @@ impl Crnn {
         })
     }
 
+    /// Recognizes text from a single text line image.
+    ///
+    /// Performs text recognition on a cropped image containing a single line of text.
+    /// Updates the provided `TextBox` with recognized text and confidence score,
+    /// and returns individual word bounding boxes.
+    ///
+    /// # Arguments
+    ///
+    /// * `src` - RGB image of the text line (will be resized internally)
+    /// * `text_box` - Text box to update with recognition results
+    /// * `global_offset` - Character offset in the document for span calculation
+    ///
+    /// # Returns
+    ///
+    /// * `Ok((words, new_offset))` - Vector of word-level TextBoxes and updated global offset
+    /// * `Err(InferenceError)` - If recognition fails
     pub fn get_text(
         &mut self,
         src: &RgbImage,
@@ -139,6 +206,27 @@ impl Crnn {
         Ok((words, new_offset))
     }
 
+    /// Converts model output scores to recognized text with word segmentation.
+    ///
+    /// Implements CTC (Connectionist Temporal Classification) decoding to convert
+    /// the raw model output probabilities into text. Also segments the text into
+    /// individual words and calculates their bounding boxes.
+    ///
+    /// # Arguments
+    ///
+    /// * `output_data` - Raw model output probabilities (flattened)
+    /// * `h` - Height dimension of the output (sequence length)
+    /// * `w` - Width dimension of the output (vocabulary size)
+    /// * `text_box` - Parent text box for calculating word positions
+    /// * `global_offset` - Starting character offset for document span tracking
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing:
+    /// - `String` - The full recognized text
+    /// - `f32` - Average confidence score for the recognition
+    /// - `Vec<TextBox>` - Word-level text boxes with positions and scores
+    /// - `usize` - Updated global offset after processing
     fn score_to_text(
         &self,
         output_data: &[f32],
@@ -255,6 +343,23 @@ impl Crnn {
         Ok((str_res, average_score, words, global_offset))
     }
 
+    /// Calculates the bounding box coordinates for a word within a text line.
+    ///
+    /// Given a text line's bounding box and a word's position within the CTC output
+    /// sequence, computes the approximate bounding box for that word using linear
+    /// interpolation along the text line.
+    ///
+    /// # Arguments
+    ///
+    /// * `text_box` - The parent text line's bounding box
+    /// * `start_pos` - Starting position in the output sequence
+    /// * `end_pos` - Ending position in the output sequence
+    /// * `total_length` - Total length of the output sequence
+    ///
+    /// # Returns
+    ///
+    /// Four corner coordinates `[top_left, top_right, bottom_right, bottom_left]`
+    /// representing the word's bounding box.
     fn calculate_word_bounds(
         &self,
         text_box: &TextBox,
@@ -298,6 +403,21 @@ impl Crnn {
         ]
     }
 
+    /// Recognizes text from multiple text line images in batch.
+    ///
+    /// Processes multiple cropped text line images sequentially, maintaining
+    /// a consistent global character offset across all lines for document-wide
+    /// span tracking.
+    ///
+    /// # Arguments
+    ///
+    /// * `part_imgs` - Slice of RGB images, one per text line
+    /// * `text_boxes` - Mutable slice of text boxes to update with results
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<TextBox>)` - All word-level text boxes from all lines
+    /// * `Err(InferenceError)` - If any recognition fails
     pub fn get_texts(
         &mut self,
         part_imgs: &[RgbImage],

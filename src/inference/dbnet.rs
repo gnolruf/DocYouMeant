@@ -1,3 +1,9 @@
+//! Differentiable Binarization Network (DBNet) for text detection.
+//!
+//! This module provides text detection capabilities using DBNet, a segmentation-based
+//! text detector that produces pixel-level probability maps and uses differentiable
+//! binarization to generate text region proposals.
+
 use geo::Coord;
 use image::{ImageBuffer, Luma, RgbImage};
 use imageproc::contours::{find_contours_with_threshold, Contour};
@@ -19,6 +25,30 @@ use crate::utils::{box_utils, image_utils};
 
 static DBNET_INSTANCE: OnceCell<Mutex<DBNet>> = OnceCell::new();
 
+/// Text detection model using Differentiable Binarization Network.
+///
+/// `DBNet` detects text regions in document images by producing a probability map
+/// and extracting bounding boxes through contour analysis. It handles arbitrary
+/// text orientations and produces rotated bounding boxes when necessary.
+///
+/// # Fields
+///
+/// - `session`: ONNX Runtime session for model inference
+/// - `mean_values`: ImageNet mean values for normalization [R, G, B]
+/// - `norm_values`: Normalization divisors for each channel
+/// - `max_side_len`: Maximum image dimension (larger images are resized)
+/// - `box_thresh`: Threshold for binary mask creation (probability cutoff)
+/// - `box_score_thresh`: Minimum average confidence score to keep a detection
+/// - `unclip_ratio`: Expansion ratio for detected boxes (compensates for shrinkage)
+/// - `src_dimensions`: Original input image dimensions `[width, height]`
+/// - `dst_dimensions`: Processed image dimensions after padding `[width, height]`
+/// - `padding`: Applied padding `[top, bottom, left, right]`
+///
+/// # Thread Safety
+///
+/// This struct is wrapped in a `Mutex` and accessed through a singleton pattern,
+/// making it safe to use from multiple threads. However, only one thread can
+/// perform inference at a time.
 pub struct DBNet {
     session: Session,
     mean_values: [f32; 3],
@@ -33,9 +63,27 @@ pub struct DBNet {
 }
 
 impl DBNet {
+    /// Path to the DBNet ONNX model file.
     const MODEL_PATH: &'static str = "models/onnx/text_detection.onnx";
+    /// Number of threads for ONNX Runtime inter-op parallelism.
     const NUM_THREADS: usize = 4;
 
+    /// Creates a new DBNet instance.
+    ///
+    /// Loads the ONNX model and initializes default parameters for text detection.
+    /// This is typically called internally by the singleton initialization.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(DBNet)` - Initialized detector ready for inference
+    /// * `Err(InferenceError)` - If the model file cannot be loaded
+    ///
+    /// # Default Parameters
+    ///
+    /// - `max_side_len`: 960 pixels
+    /// - `box_thresh`: 0.3 (probability threshold)
+    /// - `box_score_thresh`: 0.5 (minimum confidence)
+    /// - `unclip_ratio`: 1.5 (box expansion factor)
     pub fn new() -> Result<Self, InferenceError> {
         let session = Session::builder()
             .map_err(|source| InferenceError::ModelFileLoadError {
@@ -67,15 +115,42 @@ impl DBNet {
         })
     }
 
+    /// Pre-initializes the DBNet singleton instance.
+    ///
+    /// Call this method during application startup to eagerly load the model
+    /// rather than waiting for the first detection request. This is useful
+    /// for reducing latency on the first inference call.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - Model successfully initialized
+    /// * `Err(InferenceError)` - If initialization fails
     pub fn get_or_init() -> Result<(), InferenceError> {
         DBNET_INSTANCE.get_or_try_init(|| Self::new().map(Mutex::new))?;
         Ok(())
     }
 
+    /// Returns a reference to the singleton DBNet instance.
+    ///
+    /// Initializes the instance if it hasn't been created yet.
+    /// This is an internal method used by the `run()` function.
     fn instance() -> Result<&'static Mutex<DBNet>, InferenceError> {
         DBNET_INSTANCE.get_or_try_init(|| Self::new().map(Mutex::new))
     }
 
+    /// Preprocesses an image for text detection.
+    ///
+    /// Resizes the image to fit within `max_side_len` while maintaining aspect ratio,
+    /// then pads to dimensions divisible by 32 (required by the network architecture).
+    ///
+    /// # Arguments
+    ///
+    /// * `image` - Input RGB image
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(RgbImage)` - Preprocessed image ready for inference
+    /// * `Err(InferenceError)` - If preprocessing fails
     pub fn preprocess(&mut self, image: &RgbImage) -> Result<RgbImage, InferenceError> {
         let width = image.width() as i32;
         let height = image.height() as i32;
@@ -123,6 +198,30 @@ impl DBNet {
         Ok(padded_final_img)
     }
 
+    /// Performs text detection on a preprocessed image.
+    ///
+    /// Runs the DBNet model and post-processes the output probability map
+    /// to extract text region bounding boxes.
+    ///
+    /// # Arguments
+    ///
+    /// * `image` - Preprocessed image from `preprocess()`
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<TextBox>)` - Detected text regions with confidence scores
+    /// * `Err(InferenceError)` - If detection fails
+    ///
+    /// # Post-processing Pipeline
+    ///
+    /// 1. Normalize input with ImageNet statistics
+    /// 2. Run model inference to get probability map
+    /// 3. Apply threshold to create binary mask
+    /// 4. Dilate mask to connect nearby regions
+    /// 5. Find contours in the binary mask
+    /// 6. Fit minimum area rectangles to contours
+    /// 7. Filter boxes by size and confidence
+    /// 8. Rescale to original image coordinates
     pub fn detect(&mut self, image: &RgbImage) -> Result<Vec<TextBox>, InferenceError> {
         let input_array =
             image_utils::subtract_mean_normalize(image, &self.mean_values, &self.norm_values)
@@ -205,6 +304,20 @@ impl DBNet {
         Ok(text_boxes)
     }
 
+    /// Extracts text bounding boxes from the thresholded detection map.
+    ///
+    /// Processes the binary threshold image to find contours, fits minimum
+    /// area rectangles, and filters results based on size and confidence thresholds.
+    ///
+    /// # Arguments
+    ///
+    /// * `threshold_img` - Binary image from thresholding the probability map
+    /// * `pred_array` - Original probability map for confidence scoring
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<TextBox>)` - Filtered and rescaled text box detections
+    /// * `Err(InferenceError)` - If processing fails
     fn get_text_boxes(
         &mut self,
         threshold_img: &image::GrayImage,
@@ -329,6 +442,20 @@ impl DBNet {
         Ok(rs_boxes)
     }
 
+    /// Rescales a bounding box from model output coordinates to original image coordinates.
+    ///
+    /// Accounts for the preprocessing transformations (resize and padding) to map
+    /// detected boxes back to their positions in the original input image.
+    ///
+    /// # Arguments
+    ///
+    /// * `box_points` - Four corner points in model output space
+    /// * `pred_width` - Width of the prediction map
+    /// * `pred_height` - Height of the prediction map
+    ///
+    /// # Returns
+    ///
+    /// Four corner points in original image coordinates, clamped to valid bounds.
     fn rescale_box(
         &self,
         box_points: &[Coord<i32>; 4],
@@ -400,13 +527,6 @@ impl DBNet {
     /// * `Err` - If an error occurs during processing
     ///
     /// Returns 0.0 if the prediction array is empty or no pixels fall within the box.
-    ///
-    /// # Algorithm
-    ///
-    /// 1. Compute the axis-aligned bounding rectangle of the box
-    /// 2. Create a binary mask by rasterizing the polygon
-    /// 3. Sum prediction values where the mask is non-zero
-    /// 4. Return the average
     pub fn box_score(
         boxes: &[Coord<i32>; 4],
         pred: &Array2<f32>,
@@ -469,6 +589,20 @@ impl DBNet {
         }
     }
 
+    /// Detects text regions in an image (main entry point).
+    ///
+    /// This is the primary method for text detection. It handles singleton
+    /// initialization, preprocessing, inference, and post-processing in a
+    /// single call.
+    ///
+    /// # Arguments
+    ///
+    /// * `image` - Input RGB image to analyze
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<TextBox>)` - Detected text regions with bounding boxes and confidence scores
+    /// * `Err(InferenceError)` - If any step of the detection pipeline fails
     pub fn run(image: &RgbImage) -> Result<Vec<TextBox>, InferenceError> {
         let instance = Self::instance()?;
         let mut model = instance
