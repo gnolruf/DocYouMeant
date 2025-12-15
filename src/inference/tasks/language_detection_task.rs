@@ -1,3 +1,23 @@
+//! Language detection task.
+//!
+//! This module provides automatic language detection capabilities for documents.
+//! It supports two detection methods:
+//!
+//! 1. **Image-based detection**: Samples text regions from a document image and
+//!    runs OCR with multiple language models to determine which produces the
+//!    highest confidence results.
+//!
+//! 2. **Text-based detection**: Analyzes already-extracted text to identify
+//!    the language using character and word frequency analysis.
+//!
+//! # Architecture
+//!
+//! Language detection works by:
+//! 1. Sampling up to [`MAX_SAMPLE_LINES`] text regions from the document
+//! 2. If the document does not contain embedded text, running each sample through different OCR models (grouped by script)
+//!    2a. Selecting the model group with the highest average confidence score
+//! 3. Using linguistic analysis to narrow down to a specific language
+
 use std::collections::HashMap;
 
 use image::RgbImage;
@@ -13,17 +33,40 @@ use crate::utils::lang_utils::LangUtils;
 /// Maximum number of text lines to sample for language detection
 const MAX_SAMPLE_LINES: usize = 3;
 
+/// The result of a language detection operation.
+///
+/// Contains information about the detected language, including which
+/// OCR model was used and the confidence level of the detection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguageDetectionResult {
-    /// The detected language name
+    /// The detected language name (e.g., "english", "chinese", "arabic").
+    ///
+    /// This corresponds to language identifiers used by [`LangUtils`].
     pub language: String,
-    /// The model file that was used for detection
+    /// The filename of the OCR model that produced the best results.
+    ///
+    /// This may be empty for text-based detection where no OCR model is used.
     pub model_file: String,
-    /// The confidence score from the OCR model
+    /// The confidence score from the detection process (0.0 to 1.0).
+    ///
+    /// For image-based detection, this is the average OCR confidence score
+    /// across sampled text regions. For text-based detection, this is
+    /// typically set to 1.0.
     pub confidence: f32,
 }
 
 impl LanguageDetectionResult {
+    /// Creates a new `LanguageDetectionResult`.
+    ///
+    /// # Arguments
+    ///
+    /// * `language` - The detected language name.
+    /// * `model_file` - The OCR model filename used for detection.
+    /// * `confidence` - The confidence score (0.0 to 1.0).
+    ///
+    /// # Returns
+    ///
+    /// A new `LanguageDetectionResult` instance.
     pub fn new(language: String, model_file: String, confidence: f32) -> Self {
         Self {
             language,
@@ -33,15 +76,43 @@ impl LanguageDetectionResult {
     }
 }
 
+/// A group of languages that share the same OCR model.
+///
+/// Many languages share a common script (e.g., Latin alphabet), allowing
+/// them to use the same OCR model. This struct groups languages by their
+/// associated model file for efficient detection.
 #[derive(Debug, Clone)]
 struct ModelGroup {
+    /// The filename of the OCR model for this group.
     model_file: String,
+    /// The list of language names that use this model.
     languages: Vec<String>,
 }
 
+/// Task handler for automatic language detection in documents.
+///
+/// This struct provides methods for detecting the language of document content
+/// using either image-based OCR analysis or text-based linguistic analysis.
+/// The image-based approach is more accurate for scanned documents, while
+/// text-based detection is faster when text has already been extracted.
 pub struct LanguageDetectionTask;
 
 impl LanguageDetectionTask {
+    /// Builds a mapping of OCR model files to their supported languages.
+    ///
+    /// Loads all available language configurations and groups them by the
+    /// OCR model file they use. This enables efficient testing by running
+    /// each unique model only once.
+    ///
+    /// # Returns
+    ///
+    /// A `HashMap` where keys are model filenames and values are [`ModelGroup`]
+    /// instances containing the model file and list of supported languages.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`InferenceError::PreprocessingError`] if the language
+    /// configuration files cannot be loaded.
     fn build_model_groups() -> Result<HashMap<String, ModelGroup>, InferenceError> {
         let configs = LangUtils::get_all_language_configs(true).map_err(|e| {
             InferenceError::PreprocessingError {
@@ -66,6 +137,21 @@ impl LanguageDetectionTask {
         Ok(model_groups)
     }
 
+    /// Samples text lines for language detection.
+    ///
+    /// Randomly selects up to [`MAX_SAMPLE_LINES`] text regions to use for
+    /// language detection. Using a sample rather than all lines improves
+    /// performance while maintaining accuracy.
+    ///
+    /// # Arguments
+    ///
+    /// * `text_boxes` - The detected text boxes from the document.
+    /// * `part_images` - The cropped images corresponding to each text box.
+    ///
+    /// # Returns
+    ///
+    /// A vector of tuples pairing text boxes with their corresponding images.
+    /// Returns an empty vector if the input arrays have mismatched lengths.
     fn sample_text_lines<'a>(
         text_boxes: &'a [TextBox],
         part_images: &'a [RgbImage],
@@ -91,6 +177,26 @@ impl LanguageDetectionTask {
             .collect()
     }
 
+    /// Processes sampled text lines with a specific OCR model.
+    ///
+    /// Runs OCR on all sampled text regions using the specified language's
+    /// model and calculates the average confidence score.
+    ///
+    /// # Arguments
+    ///
+    /// * `language` - The language identifier to use for loading the OCR model.
+    /// * `samples` - The sampled text box and image pairs to process.
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing:
+    /// - The average confidence score across all samples
+    /// - A vector of recognized text strings
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`InferenceError`] if the OCR model fails to load or
+    /// process any of the samples.
     fn process_with_model(
         language: &str,
         samples: &[(&TextBox, &RgbImage)],
@@ -119,6 +225,32 @@ impl LanguageDetectionTask {
         Ok((avg_score, recognized_texts))
     }
 
+    /// Detects the language of a document using image-based OCR analysis.
+    ///
+    /// This method samples text regions from the document, runs them through
+    /// multiple OCR models with different script support, and determines which
+    /// model produces the highest confidence results. It then uses linguistic
+    /// analysis to narrow down to a specific language within the winning
+    /// model's supported language group.
+    ///
+    /// # Arguments
+    ///
+    /// * `text_boxes` - The detected text boxes from layout analysis.
+    /// * `part_images` - The cropped RGB images for each text box.
+    ///   Must be the same length as `text_boxes`.
+    ///
+    /// # Returns
+    ///
+    /// Returns a [`LanguageDetectionResult`] containing the detected language,
+    /// the model file used, and the confidence score.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`InferenceError`] if:
+    /// - The input arrays are empty
+    /// - No OCR models are available
+    /// - Text line sampling fails
+    /// - All OCR models fail to process the samples
     pub fn detect(
         text_boxes: &[TextBox],
         part_images: &[RgbImage],
@@ -204,6 +336,32 @@ impl LanguageDetectionTask {
         ))
     }
 
+    /// Detects the language of text using linguistic analysis.
+    ///
+    /// This method analyzes already-extracted text to determine the language
+    /// without running OCR. It's faster than image-based detection but requires
+    /// that text has already been extracted from the document.
+    ///
+    /// The detection uses character frequency analysis and word matching
+    /// against language-specific dictionaries to identify the most likely
+    /// language.
+    ///
+    /// # Arguments
+    ///
+    /// * `texts` - A slice of text strings extracted from the document.
+    ///   Multiple strings are analyzed together for better accuracy.
+    ///
+    /// # Returns
+    ///
+    /// Returns a [`LanguageDetectionResult`] with the detected language.
+    /// The `model_file` field will be empty since no OCR model was used,
+    /// and the confidence will be set to 1.0.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`InferenceError::PreprocessingError`] if:
+    /// - The input text array is empty
+    /// - Language configuration files cannot be loaded
     pub fn detect_from_text(texts: &[String]) -> Result<LanguageDetectionResult, InferenceError> {
         if texts.is_empty() {
             return Err(InferenceError::PreprocessingError {
