@@ -1,3 +1,15 @@
+//! PDF document content handling.
+//!
+//! This module provides comprehensive content extraction for PDF files.
+//! PDFs are unique in that they may contain both embedded text (from the
+//! text layer) and visual content requiring OCR, making them a mixed-modality
+//! document type.
+//!
+//! # Dependencies
+//!
+//! This module uses the `pdfium-render` crate, which requires the PDFium
+//! library to be available at runtime (either bundled or system-installed).
+
 use pdfium_render::prelude::*;
 
 use super::super::bounds::Bounds;
@@ -5,8 +17,15 @@ use super::super::error::DocumentError;
 use super::super::text_box::{Coord, Orientation, TextBox};
 use super::{DocumentContent, PageContent};
 
+/// Content container for PDF documents.
+///
+/// `PdfContent` provides rich extraction from PDF files, including both
+/// embedded text with positional information and rendered page images.
+/// This dual extraction enables hybrid analysis strategies that can use
+/// embedded text where available and fall back to OCR for scanned regions.
 #[derive(Debug)]
 pub struct PdfContent {
+    /// The pages extracted from the PDF document.
     pages: Vec<PageContent>,
 }
 
@@ -21,6 +40,27 @@ impl DocumentContent for PdfContent {
 }
 
 impl PdfContent {
+    /// Loads and parses a PDF document from raw bytes.
+    ///
+    /// This method initializes the PDFium library, parses the PDF structure,
+    /// and extracts content from all pages including embedded text, word
+    /// positions, and rendered page images.
+    ///
+    /// # Arguments
+    ///
+    /// * `bytes` - The raw bytes of the PDF file.
+    ///
+    /// # Returns
+    ///
+    /// A boxed [`DocumentContent`] trait object containing all extracted
+    /// page content, or a [`DocumentError::PdfLoadError`] if parsing fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DocumentError::PdfLoadError`] if:
+    /// - The PDFium library cannot be loaded
+    /// - The PDF file is corrupted or password-protected
+    /// - Page rendering fails
     pub fn load(bytes: &[u8]) -> Result<Box<dyn DocumentContent>, DocumentError> {
         let pdfium = Pdfium::new(
             Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name())
@@ -35,6 +75,18 @@ impl PdfContent {
         Self::process_document(&document)
     }
 
+    /// Processes all pages of a PDF document.
+    ///
+    /// Iterates through each page, extracting text content, word positions,
+    /// and rendered images at 300 DPI resolution.
+    ///
+    /// # Arguments
+    ///
+    /// * `document` - Reference to the parsed PDF document.
+    ///
+    /// # Returns
+    ///
+    /// A boxed [`DocumentContent`] containing all processed pages.
     fn process_document(document: &PdfDocument) -> Result<Box<dyn DocumentContent>, DocumentError> {
         let total_pages = document.pages().len() as usize;
         let mut pages = Vec::new();
@@ -50,6 +102,24 @@ impl PdfContent {
         Ok(Box::new(Self { pages }))
     }
 
+    /// Processes a single PDF page.
+    ///
+    /// Extracts all content from a single page including:
+    /// - Raw text content from the text layer
+    /// - Individual word positions with bounding boxes
+    /// - Rendered RGB image of the page
+    /// - Text orientation information
+    ///
+    /// # Arguments
+    ///
+    /// * `document` - Reference to the PDF document.
+    /// * `page_index` - Zero-based index of the page to process.
+    /// * `dpi` - Rendering resolution in dots per inch.
+    /// * `render_config` - PDFium render configuration.
+    ///
+    /// # Returns
+    ///
+    /// A [`PageContent`] struct populated with all extracted data.
     fn process_pdf_page(
         document: &PdfDocument,
         page_index: usize,
@@ -139,6 +209,16 @@ impl PdfContent {
         Ok(page_content)
     }
 
+    /// Extracts text orientation information from PDF page objects.
+    ///
+    /// Iterates through page objects to find text elements and records their
+    /// rotation angles. This information is used to determine the overall
+    /// page orientation.
+    ///
+    /// # Arguments
+    ///
+    /// * `iterator` - Iterator over PDF page objects.
+    /// * `orientations` - Vector to collect detected orientations.
     fn extract_orientations_from_objects(
         iterator: pdfium_render::prelude::PdfPageObjectsIterator,
         orientations: &mut Vec<Orientation>,
@@ -155,6 +235,17 @@ impl PdfContent {
         Ok(())
     }
 
+    /// Extracts individual words with bounding boxes from a PDF text page.
+    ///
+    /// Iterates through characters in the text layer, accumulating them into
+    /// words based on whitespace boundaries. Each word is assigned a bounding
+    /// box computed from the union of its character bounds.
+    ///
+    /// # Arguments
+    ///
+    /// * `text_page` - Reference to the PDF page text layer.
+    /// * `words` - Vector to collect extracted words as [`TextBox`] instances.
+    /// * `orientation` - Optional text orientation to apply to extracted words.
     fn extract_words_from_text_page(
         text_page: &PdfPageText,
         words: &mut Vec<TextBox>,
@@ -223,6 +314,20 @@ impl PdfContent {
         Ok(())
     }
 
+    /// Adds a word to the collection if it hasn't been seen before.
+    ///
+    /// Creates a [`TextBox`] for the word with its bounding box coordinates
+    /// and adds it to the words vector only if an identical word (same text
+    /// and position) hasn't already been added.
+    ///
+    /// # Arguments
+    ///
+    /// * `text` - The word text content.
+    /// * `bounds` - Optional bounding box as `(min_x, min_y, max_x, max_y)`.
+    /// * `orientation` - Optional text orientation.
+    /// * `start_index` - Character offset of the word in the page text.
+    /// * `words` - Vector to add the word to.
+    /// * `seen_words` - Set tracking already-added words for deduplication.
     fn push_word_if_unique(
         text: &str,
         bounds: Option<(f32, f32, f32, f32)>,
