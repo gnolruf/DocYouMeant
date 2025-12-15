@@ -162,12 +162,12 @@ impl Phi4MiniInference {
         format!("<|system|>{system}<|end|><|user|>{user_message}<|end|><|assistant|>")
     }
 
-    pub fn generate(
-        &mut self,
+    fn prepare_inputs(
+        &self,
         prompt: &str,
         tokenizer: &Tokenizer,
         system_message: Option<&str>,
-    ) -> Result<String, InferenceError> {
+    ) -> Result<(Array2<i64>, Array2<i64>), InferenceError> {
         let formatted_prompt = self.format_chat_template(prompt, system_message);
 
         let encoding = tokenizer.encode(formatted_prompt, true).map_err(|e| {
@@ -178,7 +178,7 @@ impl Phi4MiniInference {
         })?;
 
         let input_ids_vec: Vec<i64> = encoding.get_ids().iter().map(|&id| id as i64).collect();
-        let mut input_ids: Array2<i64> =
+        let input_ids: Array2<i64> =
             Array2::from_shape_vec((1, input_ids_vec.len()), input_ids_vec).map_err(|e| {
                 InferenceError::PreprocessingError {
                     operation: "create input_ids array".to_string(),
@@ -191,7 +191,7 @@ impl Phi4MiniInference {
             .iter()
             .map(|&mask| mask as i64)
             .collect();
-        let mut attention_mask: Array2<i64> =
+        let attention_mask: Array2<i64> =
             Array2::from_shape_vec((1, attention_mask_vec.len()), attention_mask_vec).map_err(
                 |e| InferenceError::PreprocessingError {
                     operation: "create attention_mask array".to_string(),
@@ -199,6 +199,10 @@ impl Phi4MiniInference {
                 },
             )?;
 
+        Ok((input_ids, attention_mask))
+    }
+
+    fn init_past_key_values(&self) -> Result<Vec<Value>, InferenceError> {
         let mut past_key_values: Vec<Value> = Vec::with_capacity(64);
         for _ in 0..32 {
             if self.use_cuda {
@@ -241,10 +245,10 @@ impl Phi4MiniInference {
                 );
             }
         }
+        Ok(past_key_values)
+    }
 
-        let mut generated_tokens: Vec<i64> = Vec::new();
-        let mut current_position = input_ids.shape()[1] as i64;
-
+    fn create_memory_info(&self) -> Result<(MemoryInfo, MemoryInfo), InferenceError> {
         let output_mem_info = if self.use_cuda {
             MemoryInfo::new(
                 AllocationDevice::CUDA,
@@ -279,6 +283,85 @@ impl Phi4MiniInference {
             operation: "create cpu memory info".to_string(),
             message: e.to_string(),
         })?;
+
+        Ok((output_mem_info, cpu_mem_info))
+    }
+
+    fn extract_next_token(&self, logits_value: Value) -> Result<i64, InferenceError> {
+        if self.use_cuda {
+            let logits: ArrayView<f16, _> = logits_value
+                .try_extract_array::<f16>()
+                .map_err(|source| InferenceError::ModelExecutionError {
+                    operation: "extract logits".to_string(),
+                    source,
+                })?
+                .into_dimensionality::<Ix3>()
+                .map_err(|e| InferenceError::PredictionError {
+                    operation: "reshape logits".to_string(),
+                    message: format!("Failed to reshape logits: {e}"),
+                })?;
+
+            Ok(logits
+                .slice(s![0, -1, ..VOCAB_SIZE])
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .unwrap()
+                .0 as i64)
+        } else {
+            let logits: ArrayView<f32, _> = logits_value
+                .try_extract_array::<f32>()
+                .map_err(|source| InferenceError::ModelExecutionError {
+                    operation: "extract logits".to_string(),
+                    source,
+                })?
+                .into_dimensionality::<Ix3>()
+                .map_err(|e| InferenceError::PredictionError {
+                    operation: "reshape logits".to_string(),
+                    message: format!("Failed to reshape logits: {e}"),
+                })?;
+
+            Ok(logits
+                .slice(s![0, -1, ..VOCAB_SIZE])
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .unwrap()
+                .0 as i64)
+        }
+    }
+
+    fn is_stop_token(&self, token_id: i64) -> bool {
+        token_id == self.eos_token_id as i64 || token_id == self.end_token_id as i64
+    }
+
+    fn decode_tokens(
+        &self,
+        tokens: &[i64],
+        tokenizer: &Tokenizer,
+    ) -> Result<String, InferenceError> {
+        let output_ids: Vec<u32> = tokens.iter().map(|&id| id as u32).collect();
+        tokenizer
+            .decode(&output_ids, false)
+            .map_err(|e| InferenceError::PredictionError {
+                operation: "decode tokens".to_string(),
+                message: format!("Error decoding: {e:?}"),
+            })
+    }
+
+    pub fn generate(
+        &mut self,
+        prompt: &str,
+        tokenizer: &Tokenizer,
+        system_message: Option<&str>,
+    ) -> Result<String, InferenceError> {
+        let (mut input_ids, mut attention_mask) =
+            self.prepare_inputs(prompt, tokenizer, system_message)?;
+        let mut past_key_values = self.init_past_key_values()?;
+        let (output_mem_info, cpu_mem_info) = self.create_memory_info()?;
+
+        let mut generated_tokens: Vec<i64> = Vec::new();
+        let mut current_position = input_ids.shape()[1] as i64;
 
         for _ in 0..MAX_LENGTH {
             let mut binding =
@@ -387,59 +470,21 @@ impl Phi4MiniInference {
 
             let logits_value = outputs.remove("logits").unwrap();
 
-            let token_id = if self.use_cuda {
-                let logits: ArrayView<f16, _> = logits_value
-                    .try_extract_array::<f16>()
-                    .map_err(|source| InferenceError::ModelExecutionError {
-                        operation: "extract logits".to_string(),
-                        source,
-                    })?
-                    .into_dimensionality::<Ix3>()
-                    .map_err(|e| InferenceError::PredictionError {
-                        operation: "reshape logits".to_string(),
-                        message: format!("Failed to reshape logits: {e}"),
-                    })?;
-
-                logits
-                    .slice(s![0, -1, ..VOCAB_SIZE])
-                    .iter()
-                    .enumerate()
-                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-                    .unwrap()
-                    .0 as i64
-            } else {
-                let logits: ArrayView<f32, _> = logits_value
-                    .try_extract_array::<f32>()
-                    .map_err(|source| InferenceError::ModelExecutionError {
-                        operation: "extract logits".to_string(),
-                        source,
-                    })?
-                    .into_dimensionality::<Ix3>()
-                    .map_err(|e| InferenceError::PredictionError {
-                        operation: "reshape logits".to_string(),
-                        message: format!("Failed to reshape logits: {e}"),
-                    })?;
-
-                logits
-                    .slice(s![0, -1, ..VOCAB_SIZE])
-                    .iter()
-                    .enumerate()
-                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-                    .unwrap()
-                    .0 as i64
-            };
-
-            if token_id == self.eos_token_id as i64 || token_id == self.end_token_id as i64 {
-                break;
-            }
-
-            generated_tokens.push(token_id);
-
             let mut new_past_key_values = Vec::with_capacity(64);
             for i in 0..32 {
                 new_past_key_values.push(outputs.remove(format!("present.{}.key", i)).unwrap());
                 new_past_key_values.push(outputs.remove(format!("present.{}.value", i)).unwrap());
             }
+
+            drop(outputs);
+
+            let token_id = self.extract_next_token(logits_value)?;
+
+            if self.is_stop_token(token_id) {
+                break;
+            }
+
+            generated_tokens.push(token_id);
             past_key_values = new_past_key_values;
 
             input_ids = Array2::from_elem((1, 1), token_id);
@@ -447,15 +492,6 @@ impl Phi4MiniInference {
             current_position += 1;
         }
 
-        let output_ids: Vec<u32> = generated_tokens.iter().map(|&id| id as u32).collect();
-        let generated_text =
-            tokenizer
-                .decode(&output_ids, false)
-                .map_err(|e| InferenceError::PredictionError {
-                    operation: "decode tokens".to_string(),
-                    message: format!("Error decoding: {e:?}"),
-                })?;
-
-        Ok(generated_text)
+        self.decode_tokens(&generated_tokens, tokenizer)
     }
 }
