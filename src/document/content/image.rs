@@ -13,7 +13,7 @@ use super::{DocumentContent, DocumentType, PageContent};
 #[derive(Debug)]
 pub struct ImageContent {
     /// The original document type.
-    #[allow(dead_code)]
+    #[allow(unused)]
     doc_type: DocumentType,
     /// The pages extracted from the image (always exactly one page).
     pages: Vec<PageContent>,

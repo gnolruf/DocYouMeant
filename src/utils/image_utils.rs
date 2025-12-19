@@ -4,7 +4,9 @@ use image::{imageops, ImageBuffer, Rgb, RgbImage};
 use imageproc::geometric_transformations::{warp, Interpolation, Projection};
 use ndarray::{Array, Array4};
 
-use crate::{document::text_box::Orientation, document::text_box::TextBox};
+use crate::document::text_box::Orientation;
+use crate::document::text_box::TextBox;
+use crate::utils::error::ImageError;
 
 /// Adds padding around an image with a white background.
 ///
@@ -85,9 +87,11 @@ pub fn add_image_padding(
 pub fn get_rotate_crop_image(
     src: &RgbImage,
     box_points: &[(i32, i32)],
-) -> Result<(RgbImage, bool), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(RgbImage, bool), ImageError> {
     if box_points.len() != 4 {
-        return Err("Expected exactly 4 box points".into());
+        return Err(ImageError::InvalidInput {
+            message: "Expected exactly 4 box points".to_string(),
+        });
     }
 
     let mut min_x = box_points[0].0;
@@ -106,7 +110,9 @@ pub fn get_rotate_crop_image(
     let crop_height = (max_y - min_y) as u32;
 
     if crop_width == 0 || crop_height == 0 {
-        return Err("Invalid bounding box dimensions".into());
+        return Err(ImageError::InvalidInput {
+            message: "Invalid bounding box dimensions".to_string(),
+        });
     }
 
     let mut cropped_img: RgbImage = ImageBuffer::new(crop_width, crop_height);
@@ -136,7 +142,9 @@ pub fn get_rotate_crop_image(
     let output_height = height_dist.round() as u32;
 
     if output_width == 0 || output_height == 0 {
-        return Err("Invalid output dimensions".into());
+        return Err(ImageError::InvalidInput {
+            message: "Invalid output dimensions".to_string(),
+        });
     }
 
     let from_points = [
@@ -153,11 +161,8 @@ pub fn get_rotate_crop_image(
         (0.0, output_height as f32),
     ];
 
-    let projection = Projection::from_control_points(from_points, to_points).ok_or_else(
-        || -> Box<dyn std::error::Error + Send + Sync> {
-            "Failed to create perspective transformation".into()
-        },
-    )?;
+    let projection = Projection::from_control_points(from_points, to_points)
+        .ok_or(ImageError::ProjectionFailed)?;
 
     let warped = warp(
         &cropped_img,
@@ -222,17 +227,8 @@ pub fn rotate_image(img: &RgbImage, angle_type: Orientation) -> RgbImage {
 ///
 /// # Returns
 ///
-/// Returns `Ok(Vec<RgbImage>)` containing the rotated images in the same order
-/// as the input.
-///
-/// # Errors
-///
-/// Currently does not return errors, but the signature allows for future
-/// error handling if needed.
-pub fn rotate_images_by_angle(
-    part_images: &[RgbImage],
-    text_boxes: &[TextBox],
-) -> Result<Vec<RgbImage>, Box<dyn std::error::Error + Send + Sync>> {
+/// A vector of rotated images in the same order as the input.
+pub fn rotate_images_by_angle(part_images: &[RgbImage], text_boxes: &[TextBox]) -> Vec<RgbImage> {
     let mut rotated_images = Vec::with_capacity(part_images.len());
 
     for (img, text_box) in part_images.iter().zip(text_boxes.iter()) {
@@ -245,7 +241,7 @@ pub fn rotate_images_by_angle(
         rotated_images.push(rotated_img);
     }
 
-    Ok(rotated_images)
+    rotated_images
 }
 
 /// Normalizes an image by subtracting mean values and applying normalization factors.
@@ -263,18 +259,13 @@ pub fn rotate_images_by_angle(
 ///
 /// # Returns
 ///
-/// Returns `Ok(Array4<f32>)` with shape `[1, 3, height, width]` in NCHW format
+/// An `Array4<f32>` with shape `[1, 3, height, width]` in NCHW format
 /// (batch, channels, height, width), suitable for ONNX model inference.
-///
-/// # Errors
-///
-/// Currently does not return errors, but the signature allows for future
-/// error handling if needed.
 pub fn subtract_mean_normalize(
     img: &RgbImage,
     mean_values: &[f32; 3],
     norm_values: &[f32; 3],
-) -> Result<Array4<f32>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Array4<f32> {
     let width = img.width() as usize;
     let height = img.height() as usize;
 
@@ -295,7 +286,7 @@ pub fn subtract_mean_normalize(
         }
     }
 
-    Ok(input)
+    input
 }
 
 /// Extracts image regions for each detected text box.
@@ -322,7 +313,7 @@ pub fn subtract_mean_normalize(
 pub fn get_image_parts(
     src: &RgbImage,
     text_boxes: &[TextBox],
-) -> Result<Vec<RgbImage>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<Vec<RgbImage>, ImageError> {
     let mut part_images = Vec::with_capacity(text_boxes.len());
 
     for text_box in text_boxes.iter() {

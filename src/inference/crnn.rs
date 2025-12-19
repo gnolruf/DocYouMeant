@@ -156,11 +156,7 @@ impl Crnn {
         );
 
         let input_array =
-            image_utils::subtract_mean_normalize(&src_resize, &self.mean_values, &self.norm_values)
-                .map_err(|e| InferenceError::PreprocessingError {
-                    operation: "normalize image".to_string(),
-                    message: e.to_string(),
-                })?;
+            image_utils::subtract_mean_normalize(&src_resize, &self.mean_values, &self.norm_values);
 
         let shape = input_array.shape().to_vec();
         let (data, _offset) = input_array.into_raw_vec_and_offset();

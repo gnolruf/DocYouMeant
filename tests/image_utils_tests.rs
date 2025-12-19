@@ -215,7 +215,7 @@ fn test_subtract_mean_normalize() {
     let mean = [50.0, 50.0, 50.0];
     let norm = [2.0, 2.0, 2.0];
 
-    let result = subtract_mean_normalize(&img, &mean, &norm).unwrap();
+    let result = subtract_mean_normalize(&img, &mean, &norm);
 
     assert_eq!(result.shape(), &[1, 3, 2, 2]);
 
@@ -231,7 +231,7 @@ fn test_subtract_mean_normalize_zeros() {
     let mean = [0.0, 0.0, 0.0];
     let norm = [1.0, 1.0, 1.0];
 
-    let result = subtract_mean_normalize(&img, &mean, &norm).unwrap();
+    let result = subtract_mean_normalize(&img, &mean, &norm);
     assert_eq!(result.shape(), &[1, 3, 2, 2]);
 
     // All zeros input with zero mean should produce zeros
@@ -248,7 +248,7 @@ fn test_subtract_mean_normalize_white_image() {
     let mean = [0.5, 0.5, 0.5];
     let norm = [1.0 / 255.0, 1.0 / 255.0, 1.0 / 255.0];
 
-    let result = subtract_mean_normalize(&img, &mean, &norm).unwrap();
+    let result = subtract_mean_normalize(&img, &mean, &norm);
 
     // Formula: (pixel_value * norm) - (mean * norm)
     // (255 * (1/255)) - (0.5 * (1/255)) = 1.0 - 0.00196 ≈ 0.998
@@ -263,7 +263,7 @@ fn test_subtract_mean_normalize_single_pixel() {
     let mean = [0.0, 0.0, 0.0];
     let norm = [1.0, 1.0, 1.0];
 
-    let result = subtract_mean_normalize(&img, &mean, &norm).unwrap();
+    let result = subtract_mean_normalize(&img, &mean, &norm);
 
     assert_eq!(result.shape(), &[1, 3, 1, 1]);
     assert_eq!(result[[0, 0, 0, 0]], 128.0);
@@ -280,7 +280,7 @@ fn test_subtract_mean_normalize_different_channel_params() {
     let mean = [50.0, 25.0, 0.0];
     let norm = [1.0, 2.0, 0.5];
 
-    let result = subtract_mean_normalize(&img, &mean, &norm).unwrap();
+    let result = subtract_mean_normalize(&img, &mean, &norm);
 
     // R: (100 * 1.0) - (50.0 * 1.0) = 50.0
     // G: (100 * 2.0) - (25.0 * 2.0) = 200 - 50 = 150.0
@@ -516,7 +516,7 @@ fn test_rotate_images_by_angle_no_rotation() {
         span: None,
     }];
 
-    let result = rotate_images_by_angle(&[img.clone()], &text_boxes).unwrap();
+    let result = rotate_images_by_angle(&[img.clone()], &text_boxes);
     assert_eq!(result.len(), 1);
     // Without angle, image should not be rotated
     assert_eq!(result[0].width(), 10);
@@ -536,7 +536,7 @@ fn test_rotate_images_by_angle_with_rotation() {
         span: None,
     }];
 
-    let result = rotate_images_by_angle(&[img], &text_boxes).unwrap();
+    let result = rotate_images_by_angle(&[img], &text_boxes);
     assert_eq!(result.len(), 1);
     // 90 degree rotation swaps dimensions
     assert_eq!(result[0].width(), 5);
@@ -567,7 +567,7 @@ fn test_rotate_images_by_angle_mixed() {
         },
     ];
 
-    let result = rotate_images_by_angle(&[img1, img2], &text_boxes).unwrap();
+    let result = rotate_images_by_angle(&[img1, img2], &text_boxes);
     assert_eq!(result.len(), 2);
 
     // First image: no rotation (0 degrees)

@@ -42,6 +42,30 @@ pub enum LayoutClass {
 }
 
 impl LayoutClass {
+    /// All layout classes in order of their numeric IDs (0-19).
+    const ALL_CLASSES: [Self; 20] = [
+        Self::ParagraphTitle,
+        Self::Image,
+        Self::Text,
+        Self::Number,
+        Self::Abstract,
+        Self::Content,
+        Self::FigureTitle,
+        Self::Formula,
+        Self::Table,
+        Self::Reference,
+        Self::DocTitle,
+        Self::Footnote,
+        Self::Header,
+        Self::Algorithm,
+        Self::Footer,
+        Self::Seal,
+        Self::Chart,
+        Self::FormulaNumber,
+        Self::AsideText,
+        Self::ReferenceContent,
+    ];
+
     /// Converts a numeric class ID to the corresponding [`LayoutClass`] variant.
     ///
     /// # Arguments
@@ -51,30 +75,10 @@ impl LayoutClass {
     /// # Returns
     ///
     /// Returns `Some(LayoutClass)` if the ID is valid (0-19), or `None` for invalid IDs.
+    #[inline]
+    #[must_use]
     pub fn from_id(id: usize) -> Option<Self> {
-        match id {
-            0 => Some(Self::ParagraphTitle),
-            1 => Some(Self::Image),
-            2 => Some(Self::Text),
-            3 => Some(Self::Number),
-            4 => Some(Self::Abstract),
-            5 => Some(Self::Content),
-            6 => Some(Self::FigureTitle),
-            7 => Some(Self::Formula),
-            8 => Some(Self::Table),
-            9 => Some(Self::Reference),
-            10 => Some(Self::DocTitle),
-            11 => Some(Self::Footnote),
-            12 => Some(Self::Header),
-            13 => Some(Self::Algorithm),
-            14 => Some(Self::Footer),
-            15 => Some(Self::Seal),
-            16 => Some(Self::Chart),
-            17 => Some(Self::FormulaNumber),
-            18 => Some(Self::AsideText),
-            19 => Some(Self::ReferenceContent),
-            _ => None,
-        }
+        Self::ALL_CLASSES.get(id).copied()
     }
 
     /// Checks if this layout class represents a text region.

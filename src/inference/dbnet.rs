@@ -224,11 +224,7 @@ impl DBNet {
     /// 8. Rescale to original image coordinates
     pub fn detect(&mut self, image: &RgbImage) -> Result<Vec<TextBox>, InferenceError> {
         let input_array =
-            image_utils::subtract_mean_normalize(image, &self.mean_values, &self.norm_values)
-                .map_err(|e| InferenceError::PreprocessingError {
-                    operation: "normalize image".to_string(),
-                    message: e.to_string(),
-                })?;
+            image_utils::subtract_mean_normalize(image, &self.mean_values, &self.norm_values);
 
         let shape = input_array.shape().to_vec();
         let (data, _offset) = input_array.into_raw_vec_and_offset();
@@ -330,7 +326,7 @@ impl DBNet {
         let contours: Vec<Contour<i32>> =
             find_contours_with_threshold(threshold_img, threshold_value);
         let num_contours = contours.len().min(MAX_CANDIDATES);
-        let mut rs_boxes = Vec::new();
+        let mut rs_boxes = Vec::with_capacity(num_contours);
 
         for contour in contours.iter().take(num_contours) {
             if contour.points.len() <= 2 {

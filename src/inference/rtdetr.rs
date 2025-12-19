@@ -257,11 +257,7 @@ impl RtDetr {
         image: &RgbImage,
     ) -> Result<(Value, Value, Value), InferenceError> {
         let input_array =
-            image_utils::subtract_mean_normalize(image, &self.mean_values, &self.norm_values)
-                .map_err(|e| InferenceError::PreprocessingError {
-                    operation: "normalize image".to_string(),
-                    message: e.to_string(),
-                })?;
+            image_utils::subtract_mean_normalize(image, &self.mean_values, &self.norm_values);
 
         let image_shape = input_array.shape().to_vec();
         let (image_data, _offset) = input_array.into_raw_vec_and_offset();

@@ -268,11 +268,7 @@ impl LCNet {
         is_vertical: bool,
     ) -> Result<Orientation, InferenceError> {
         let input_array =
-            image_utils::subtract_mean_normalize(src, &self.mean_values, &self.norm_values)
-                .map_err(|e| InferenceError::PreprocessingError {
-                    operation: "normalize image".to_string(),
-                    message: e.to_string(),
-                })?;
+            image_utils::subtract_mean_normalize(src, &self.mean_values, &self.norm_values);
 
         let shape = input_array.shape().to_vec();
         let (data, _offset) = input_array.into_raw_vec_and_offset();
@@ -372,11 +368,7 @@ impl LCNet {
     /// * `Err(InferenceError)` - If inference fails
     fn infer_table_type(&mut self, src: &RgbImage) -> Result<TableType, InferenceError> {
         let input_array =
-            image_utils::subtract_mean_normalize(src, &self.mean_values, &self.norm_values)
-                .map_err(|e| InferenceError::PreprocessingError {
-                    operation: "normalize image".to_string(),
-                    message: e.to_string(),
-                })?;
+            image_utils::subtract_mean_normalize(src, &self.mean_values, &self.norm_values);
 
         let shape = input_array.shape().to_vec();
         let (data, _offset) = input_array.into_raw_vec_and_offset();

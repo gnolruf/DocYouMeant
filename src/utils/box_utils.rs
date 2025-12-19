@@ -1,6 +1,7 @@
 //! Utility functions for bounding box operations.
 
 use crate::document::bounds::Bounds;
+use crate::utils::error::BoxError;
 use geo::{Area, BooleanOps, Coord, LineString, Polygon};
 use geo_clipper::Clipper;
 
@@ -189,7 +190,7 @@ pub fn apply_nms(
 pub fn unclip_box(
     box_points: &[Coord<i32>; 4],
     unclip_ratio: f32,
-) -> Result<Vec<Coord<i32>>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<Vec<Coord<i32>>, BoxError> {
     let mut area = 0.0;
     let mut dist = 0.0;
 
@@ -231,7 +232,7 @@ pub fn unclip_box(
                 .collect();
             Ok(points)
         }
-        None => Ok(box_points.to_vec()),
+        None => Err(BoxError::OffsetFailed),
     }
 }
 
@@ -333,7 +334,7 @@ pub fn graph_based_reading_order(bounds_list: &[Bounds]) -> Vec<usize> {
 
     let n = bounds_list.len();
 
-    let mut graph: Vec<Vec<usize>> = vec![Vec::new(); n];
+    let mut graph: Vec<Vec<usize>> = vec![Vec::with_capacity(n / 4); n];
     let mut in_degree: Vec<usize> = vec![0; n];
 
     for i in 0..n {
@@ -350,8 +351,8 @@ pub fn graph_based_reading_order(bounds_list: &[Bounds]) -> Vec<usize> {
     }
 
     // Topological sort using Kahn's algorithm
-    let mut queue: Vec<usize> = Vec::new();
-    let mut result: Vec<usize> = Vec::new();
+    let mut queue: Vec<usize> = Vec::with_capacity(n);
+    let mut result: Vec<usize> = Vec::with_capacity(n);
 
     for (i, &deg) in in_degree.iter().enumerate() {
         if deg == 0 {

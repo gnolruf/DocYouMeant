@@ -148,11 +148,11 @@ impl AnalysisPipeline {
         );
         match self.document_type {
             DocumentType::Pdf => {
-                if let Some(image) = page.image.clone() {
+                if let Some(ref image) = page.image {
                     if page.has_embedded_text_data() {
                         debug!("Processing PDF with embedded text");
                         let (text_lines, layout_boxes, tables, orientation, language) =
-                            self.process_pdf_with_embedded_text(&image, page)?;
+                            self.process_pdf_with_embedded_text(image, page)?;
 
                         page.orientation = Some(orientation);
                         page.layout_boxes = layout_boxes.clone();
@@ -168,7 +168,7 @@ impl AnalysisPipeline {
                     } else {
                         debug!("Processing PDF as image");
                         let (text_lines, words, layout_boxes, tables, orientation, language) =
-                            self.process_image_document(&image, page.page_number)?;
+                            self.process_image_document(image, page.page_number)?;
 
                         page.orientation = Some(orientation);
                         page.layout_boxes = layout_boxes.clone();
@@ -194,9 +194,9 @@ impl AnalysisPipeline {
             }
             DocumentType::Png | DocumentType::Jpeg | DocumentType::Tiff => {
                 debug!("Processing image document");
-                if let Some(image) = page.image.clone() {
+                if let Some(ref image) = page.image {
                     let (text_lines, words, layout_boxes, tables, orientation, language) =
-                        self.process_image_document(&image, page.page_number)?;
+                        self.process_image_document(image, page.page_number)?;
 
                     page.orientation = Some(orientation);
                     page.layout_boxes = layout_boxes.clone();
@@ -826,12 +826,7 @@ impl AnalysisPipeline {
             }
         }
 
-        let rotated_parts = image_utils::rotate_images_by_angle(&image_parts, &text_lines)
-            .map_err(|e| DocumentError::ModelProcessingError {
-                source: InferenceError::ProcessingError {
-                    message: format!("Failed to rotate image parts: {e}"),
-                },
-            })?;
+        let rotated_parts = image_utils::rotate_images_by_angle(&image_parts, &text_lines);
 
         let cached_language = self.language.borrow().clone();
         let language = match cached_language {
