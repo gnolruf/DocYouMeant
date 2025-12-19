@@ -50,9 +50,8 @@ impl QuestionAndAnswerResult {
 /// Task handler for document-based question answering.
 ///
 /// This struct provides methods for answering questions based on document
-/// content using the Phi-4 Mini language model. The model is instructed to
-/// answer questions using only information present in the provided context,
-/// avoiding hallucinations or external knowledge.
+/// content using a language model. The model is instructed to
+/// answer questions using only information present in the provided context.
 ///
 /// # Architecture
 ///
@@ -64,7 +63,7 @@ impl QuestionAndAnswerResult {
 pub struct QuestionAndAnswerTask;
 
 impl QuestionAndAnswerTask {
-    /// Initializes the underlying Phi-4 Mini model if not already loaded.
+    /// Initializes the underlying model if not already loaded.
     ///
     /// This method should be called at application startup to preload the
     /// language model, avoiding latency on the first question. The model
@@ -82,10 +81,8 @@ impl QuestionAndAnswerTask {
 
     /// Answers a question based on the provided document context.
     ///
-    /// This method sends the context and question to the Phi-4 Mini model,
+    /// This method sends the context and question to the model,
     /// which generates an answer using only information found in the context.
-    /// The model is instructed to indicate when information is not available
-    /// rather than making assumptions.
     ///
     /// # Arguments
     ///

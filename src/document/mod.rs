@@ -30,8 +30,7 @@ use content::{CsvContent, ExcelContent, PdfContent, TextContent, WordContent};
 
 /// Represents a loaded document that can be analyzed for content extraction.
 ///
-/// `Document` is the primary entry point for document processing. It supports
-/// various file formats.
+/// `Document` is the primary entry point for document processing.
 #[derive(Debug)]
 pub struct Document {
     /// The type of document (PDF, Word, Image, etc.)
@@ -126,12 +125,6 @@ impl Document {
 
     /// Analyzes the document content using the analysis pipeline.
     ///
-    /// This method performs document analysis including:
-    /// - Layout detection (for images and PDFs)
-    /// - Text extraction and OCR
-    /// - Table detection and extraction
-    /// - Question answering (if questions are provided)
-    ///
     /// # Arguments
     ///
     /// * `questions` - Optional slice of questions to answer about the document
@@ -193,7 +186,6 @@ impl Document {
 
         let mut result = to_analyze_result(&self.doc_type, content, &self.process_id);
 
-        // Set the analysis results from Document
         if !self.question_answers.is_empty() {
             result.set_question_answers(self.question_answers.clone());
         }

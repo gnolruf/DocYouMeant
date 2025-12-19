@@ -122,7 +122,7 @@ impl Orientation {
 
 /// A detected text region with recognized content and confidence scores.
 ///
-/// `TextBox` represents a single text detection from the OCR pipeline,
+/// `TextBox` represents a single text detection from the pipeline,
 /// containing both spatial information (where the text is) and semantic
 /// information (what the text says).
 ///

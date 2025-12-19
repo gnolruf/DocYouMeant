@@ -18,14 +18,8 @@ use crate::document::text_box::TextBox;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TableType {
     /// A table with visible grid lines/borders.
-    ///
-    /// These tables have explicit visual separators between cells,
-    /// making cell boundaries easier to detect.
     Wired,
     /// A table without visible grid lines/borders.
-    ///
-    /// These tables rely on spatial alignment and whitespace to
-    /// define cell boundaries, requiring different detection strategies.
     Wireless,
 }
 
@@ -33,7 +27,7 @@ pub enum TableType {
 ///
 /// Each `TableCell` represents one cell in the table grid, with its spatial
 /// bounds, grid position (row/column), span information for merged cells,
-/// and optional text content extracted from OCR.
+/// and optional text content.
 ///
 /// # Grid Position
 ///
@@ -54,7 +48,7 @@ pub struct TableCell {
     pub row_span: usize,
     /// Number of columns spanned by this cell (≥1, >1 for merged cells).
     pub column_span: usize,
-    /// The text content within this cell, created from matched OCR words.
+    /// The text content within this cell.
     pub content: Option<TextBox>,
 }
 
@@ -88,7 +82,7 @@ impl TableCell {
         }
     }
 
-    /// Sets the cell's text content by combining multiple OCR word boxes.
+    /// Sets the cell's text content by combining multiple word boxes.
     ///
     /// This method takes a slice of [`TextBox`] words that have been matched
     /// to this cell and combines them into a single content `TextBox`. The
@@ -414,7 +408,7 @@ impl Table {
         best_idx
     }
 
-    /// Matches OCR word boxes to table cells based on spatial overlap.
+    /// Matches word boxes to table cells based on spatial overlap.
     ///
     /// For each cell, finds all words that overlap by at least the specified
     /// threshold and combines them into the cell's content. This populates
@@ -422,10 +416,9 @@ impl Table {
     ///
     /// # Arguments
     ///
-    /// * `words` - Slice of OCR-detected text boxes to match.
+    /// * `words` - Slice of text boxes to match.
     /// * `overlap_threshold` - Minimum overlap ratio (0.0 to 1.0) for a word
-    ///   to be considered part of a cell. A value of 0.5 means at least 50%
-    ///   of the word must overlap with the cell.
+    ///   to be considered part of a cell.
     pub fn match_words_to_cells(&mut self, words: &[TextBox], overlap_threshold: f32) {
         use crate::utils::box_utils;
 

@@ -91,8 +91,7 @@ impl LanguageDetectionTask {
     /// Builds a mapping of OCR model files to their supported languages.
     ///
     /// Loads all available language configurations and groups them by the
-    /// OCR model file they use. This enables efficient testing by running
-    /// each unique model only once.
+    /// OCR model file they use.
     ///
     /// # Returns
     ///
@@ -328,13 +327,7 @@ impl LanguageDetectionTask {
 
     /// Detects the language of text using linguistic analysis.
     ///
-    /// This method analyzes already-extracted text to determine the language
-    /// without running OCR. It's faster than image-based detection but requires
-    /// that text has already been extracted from the document.
-    ///
-    /// The detection uses character frequency analysis and word matching
-    /// against language-specific dictionaries to identify the most likely
-    /// language.
+    /// This method analyzes text to determine the language.
     ///
     /// # Arguments
     ///
