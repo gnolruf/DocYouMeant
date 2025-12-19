@@ -63,7 +63,7 @@ RUN useradd -m -s /bin/bash developer && \
 
 # Install Rust for the developer user
 USER developer
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.81
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.92.0
 ENV PATH="/home/developer/.cargo/bin:${PATH}"
 
 WORKDIR /app
@@ -72,7 +72,7 @@ WORKDIR /app
 FROM base AS builder
 
 # Install Rust for building
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.81
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.92.0
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 WORKDIR /app

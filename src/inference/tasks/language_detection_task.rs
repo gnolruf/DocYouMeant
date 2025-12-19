@@ -11,8 +11,8 @@
 use std::collections::HashMap;
 
 use image::RgbImage;
+use rand::rng;
 use rand::seq::SliceRandom;
-use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 
 use crate::document::text_box::TextBox;
@@ -155,7 +155,7 @@ impl LanguageDetectionTask {
             return pairs;
         }
 
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let mut indices: Vec<usize> = (0..pairs.len()).collect();
         indices.shuffle(&mut rng);
 

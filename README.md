@@ -6,7 +6,7 @@
   *A lightweight Rust-based document understanding API*
 
   [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-  [![Rust](https://img.shields.io/badge/rust-1.81%2B-orange.svg)](https://www.rust-lang.org)
+  [![Rust](https://img.shields.io/badge/rust-1.92%2B-orange.svg)](https://www.rust-lang.org)
   [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
 </div>
 
@@ -42,7 +42,7 @@ DocYouMeant is a high-performance document understanding API server built with R
 
 ### Prerequisites
 
-- Rust 1.81 or later
+- Rust 1.92 or later
 - Python 3.x (for model management)
 - Docker (optional, for containerized deployment)
 
