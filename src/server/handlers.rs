@@ -3,13 +3,6 @@
 //! This module contains the handler functions that process incoming HTTP requests
 //! and produce responses. Each handler corresponds to an API endpoint defined in
 //! the router.
-//!
-//! # Handlers
-//!
-//! | Handler | Endpoint | Description |
-//! |---------|----------|-------------|
-//! | [`health`] | `GET /health` | Server health check |
-//! | [`analyze_document`] | `POST /api/v1/analyze` | Document analysis |
 
 use axum::response::Json;
 
