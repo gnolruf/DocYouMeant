@@ -1,6 +1,6 @@
 //! PDF document content handling.
 //!
-//! This module provides comprehensive content extraction for PDF files.
+//! This module provides content extraction for PDF files.
 //! PDFs are unique in that they may contain both embedded text (from the
 //! text layer) and visual content requiring OCR, making them a mixed-modality
 //! document type.
@@ -17,12 +17,13 @@ use super::super::error::DocumentError;
 use super::super::text_box::{Coord, Orientation, TextBox};
 use super::{DocumentContent, PageContent};
 
+/// Default rendering resolution in dots per inch for PDF pages.
+const PDF_RENDER_DPI: f32 = 300.0;
+
 /// Content container for PDF documents.
 ///
 /// `PdfContent` provides rich extraction from PDF files, including both
 /// embedded text with positional information and rendered page images.
-/// This dual extraction enables hybrid analysis strategies that can use
-/// embedded text where available and fall back to OCR for scanned regions.
 #[derive(Debug)]
 pub struct PdfContent {
     /// The pages extracted from the PDF document.
@@ -78,7 +79,7 @@ impl PdfContent {
     /// Processes all pages of a PDF document.
     ///
     /// Iterates through each page, extracting text content, word positions,
-    /// and rendered images at 300 DPI resolution.
+    /// and rendered images.
     ///
     /// # Arguments
     ///
@@ -91,11 +92,10 @@ impl PdfContent {
         let total_pages = document.pages().len() as usize;
         let mut pages = Vec::new();
 
-        let dpi = 300.0;
-        let render_config = PdfRenderConfig::new().scale_page_by_factor(dpi / 72.0);
+        let render_config = PdfRenderConfig::new().scale_page_by_factor(PDF_RENDER_DPI / 72.0);
 
         for page_index in 0..total_pages {
-            let page_content = Self::process_pdf_page(document, page_index, dpi, &render_config)?;
+            let page_content = Self::process_pdf_page(document, page_index, PDF_RENDER_DPI, &render_config)?;
             pages.push(page_content);
         }
 
@@ -212,8 +212,7 @@ impl PdfContent {
     /// Extracts text orientation information from PDF page objects.
     ///
     /// Iterates through page objects to find text elements and records their
-    /// rotation angles. This information is used to determine the overall
-    /// page orientation.
+    /// rotation angles.
     ///
     /// # Arguments
     ///

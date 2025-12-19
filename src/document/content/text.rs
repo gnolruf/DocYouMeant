@@ -1,8 +1,6 @@
 //! Plain text document content handling.
 //!
 //! This module provides content extraction for plain text files (`.txt`).
-//! Text files are the simplest document type, containing only unformatted
-//! text content without any structural information.
 
 use super::super::error::DocumentError;
 use super::{DocumentContent, PageContent};

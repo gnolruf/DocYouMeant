@@ -1,9 +1,8 @@
 //! Document content types and abstractions.
 //!
-//! This module provides content representations for various document formats
-//! supported by DocYouMeant. Each document type has a corresponding content
-//! struct that implements the [`DocumentContent`] trait, enabling uniform
-//! access to document pages and extracted text.
+//! This module provides content representations for supported document formats.
+//! Each document type has a corresponding content struct that implements
+//! the [`DocumentContent`] trait.
 
 mod csv;
 mod excel;
@@ -33,18 +32,9 @@ use crate::inference::tasks::question_and_answer_task::QuestionAndAnswerResult;
 
 /// Supported document file types.
 ///
-/// This enum represents all file formats that DocYouMeant can process.
+/// This enum represents all currently supported file formats.
 /// Each variant corresponds to a specific file format with its own
 /// content parsing and analysis capabilities.
-///
-/// # Modalities
-///
-/// Document types are classified by their content modalities:
-/// - **Text-only**: [`Text`], [`Word`], [`Excel`], [`Csv`] - contain structured text
-/// - **Image-only**: [`Png`], [`Jpeg`], [`Tiff`] - require OCR for text extraction
-/// - **Mixed**: [`Pdf`] - may contain both embedded text and images
-///
-/// Use [`HashSet<Modality>::from()`](From) to determine the modalities for a document type.
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum DocumentType {
     /// Plain text file (`.txt`).
@@ -67,8 +57,6 @@ pub enum DocumentType {
 
 impl DocumentType {
     /// Creates a `DocumentType` from a file extension string.
-    ///
-    /// The comparison is case-insensitive, so both "PDF" and "pdf" will match.
     ///
     /// # Arguments
     ///
@@ -143,19 +131,13 @@ pub enum Modality {
     Text,
     /// Visual content requiring image-based analysis.
     ///
-    /// Documents with this modality require OCR (Optical Character
-    /// Recognition) and visual layout analysis to extract text.
+    /// Documents with this modality require OCR
+    /// and visual layout analysis to extract text.
     Image,
 }
 
 impl From<DocumentType> for HashSet<Modality> {
     /// Determines the content modalities present in a document type.
-    ///
-    /// # Modality Mapping
-    ///
-    /// - **Text-only formats** (`txt`, `docx`, `xlsx`, `csv`): Returns `{Text}`
-    /// - **Image formats** (`png`, `jpg`, `tiff`): Returns `{Image}`
-    /// - **Mixed formats** (`pdf`): Returns `{Text, Image}`
     fn from(doc_type: DocumentType) -> Self {
         let mut modalities = HashSet::new();
         match doc_type {
@@ -189,16 +171,6 @@ impl From<DocumentType> for HashSet<Modality> {
 /// 3. **Text lines**: Lines of text detected by the text detection model
 /// 4. **Words**: Individual words from OCR or embedded text extraction
 /// 5. **Tables**: Structured table data with cell contents
-///
-/// # Serialization
-///
-/// When serialized, internal analysis artifacts (`image`, `layout_boxes`, `regions`,
-/// `question_answers`) are skipped to produce a clean output focused on the
-/// extracted content.
-///
-/// # Page Numbering
-///
-/// Pages are 1-indexed to match conventional document page numbering.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PageContent {
     /// The page number within the document (1-indexed).

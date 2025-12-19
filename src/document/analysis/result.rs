@@ -15,7 +15,7 @@ use crate::inference::tasks::question_and_answer_task::QuestionAndAnswerResult;
 /// The complete result of document analysis.
 ///
 /// `AnalysisResult` aggregates all information extracted during document processing,
-/// providing a comprehensive view of the document's content, structure, and any
+/// including the document's content, structure, and any
 /// question-answering results.
 ///
 /// This struct is designed for serialization to JSON and is the primary output
