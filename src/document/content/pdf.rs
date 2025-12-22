@@ -95,7 +95,8 @@ impl PdfContent {
         let render_config = PdfRenderConfig::new().scale_page_by_factor(PDF_RENDER_DPI / 72.0);
 
         for page_index in 0..total_pages {
-            let page_content = Self::process_pdf_page(document, page_index, PDF_RENDER_DPI, &render_config)?;
+            let page_content =
+                Self::process_pdf_page(document, page_index, PDF_RENDER_DPI, &render_config)?;
             pages.push(page_content);
         }
 

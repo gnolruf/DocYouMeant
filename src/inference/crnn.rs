@@ -8,7 +8,8 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
-use image::{imageops, RgbImage};
+use image::{imageops, Rgb, RgbImage};
+use ndarray::{Array4, Axis};
 use ort::{inputs, session::Session, value::Value};
 
 use crate::document::bounds::Bounds;
@@ -48,6 +49,9 @@ pub struct Crnn {
 impl Crnn {
     /// Number of threads for ONNX Runtime inter-op parallelism.
     const NUM_THREADS: usize = 4;
+
+    /// Padding color for batched images (gray, matching normalization mean).
+    const PAD_COLOR: Rgb<u8> = Rgb([127, 127, 127]);
 
     /// Inserts special characters into the character dictionary.
     ///
@@ -123,6 +127,29 @@ impl Crnn {
         })
     }
 
+    /// Pads an image to the target width with the padding color.
+    ///
+    /// Creates a new image of the target dimensions and copies the source
+    /// image into the left portion, leaving the right side padded.
+    ///
+    /// # Arguments
+    ///
+    /// * `src` - Source image to pad
+    /// * `target_width` - Desired width of the output image
+    ///
+    /// # Returns
+    ///
+    /// A new image with the source content left-aligned and padding on the right.
+    fn pad_image(src: &RgbImage, target_width: u32) -> RgbImage {
+        if src.width() >= target_width {
+            return src.clone();
+        }
+
+        let mut padded = RgbImage::from_pixel(target_width, src.height(), Self::PAD_COLOR);
+        imageops::replace(&mut padded, src, 0, 0);
+        padded
+    }
+
     /// Recognizes text from a single text line image.
     ///
     /// Performs text recognition on a cropped image containing a single line of text.
@@ -145,59 +172,23 @@ impl Crnn {
         text_box: &mut TextBox,
         global_offset: usize,
     ) -> Result<(Vec<TextBox>, usize), InferenceError> {
-        let scale = self.dst_height as f32 / src.height() as f32;
-        let dst_width = (src.width() as f32 * scale) as u32;
+        let images = vec![src.clone()];
+        let mut text_boxes = vec![text_box.clone()];
 
-        let src_resize = imageops::resize(
-            src,
-            dst_width,
-            self.dst_height,
-            imageops::FilterType::Lanczos3,
-        );
+        let words = self.get_texts_internal(&images, &mut text_boxes, global_offset)?;
 
-        let input_array =
-            image_utils::subtract_mean_normalize(&src_resize, &self.mean_values, &self.norm_values);
+        // Copy results back to the original text_box
+        if let Some(result) = text_boxes.first() {
+            text_box.text = result.text.clone();
+            text_box.text_score = result.text_score;
+            text_box.span = result.span;
+        }
 
-        let shape = input_array.shape().to_vec();
-        let (data, _offset) = input_array.into_raw_vec_and_offset();
-        let input_value = Value::from_array((shape.as_slice(), data)).map_err(|e| {
-            InferenceError::PreprocessingError {
-                operation: "create input value".to_string(),
-                message: e.to_string(),
-            }
-        })?;
-
-        let (output_data, output_shape) = {
-            let outputs = self
-                .session
-                .run(inputs!["x" => input_value])
-                .map_err(|source| InferenceError::ModelExecutionError {
-                    operation: "CrnnNet forward pass".to_string(),
-                    source,
-                })?;
-
-            let output_tensor = outputs
-                .get("fetch_name_0")
-                .ok_or_else(|| InferenceError::PredictionError {
-                    operation: "get model outputs".to_string(),
-                    message: "Output 'fetch_name_0' not found".to_string(),
-                })?
-                .try_extract_tensor::<f32>()
-                .map_err(|source| InferenceError::PredictionError {
-                    operation: "extract output tensor".to_string(),
-                    message: source.to_string(),
-                })?;
-
-            (output_tensor.1.to_vec(), output_tensor.0.clone())
-        };
-
-        let h = output_shape[1] as usize;
-        let w = output_shape[2] as usize;
-
-        let (text, score, words, new_offset) =
-            self.score_to_text(&output_data, h, w, text_box, global_offset)?;
-        text_box.text = Some(text);
-        text_box.text_score = score;
+        let new_offset = text_boxes
+            .first()
+            .and_then(|tb| tb.span.as_ref())
+            .map(|span| span.offset + span.length)
+            .unwrap_or(global_offset);
 
         Ok((words, new_offset))
     }
@@ -401,9 +392,10 @@ impl Crnn {
 
     /// Recognizes text from multiple text line images in batch.
     ///
-    /// Processes multiple cropped text line images sequentially, maintaining
-    /// a consistent global character offset across all lines for document-wide
-    /// span tracking.
+    /// Processes multiple cropped text line images in a single batched forward pass
+    /// Images are padded to uniform width before batching.
+    /// Maintains a consistent global character offset across all lines for
+    /// document-wide span tracking.
     ///
     /// # Arguments
     ///
@@ -419,24 +411,173 @@ impl Crnn {
         part_imgs: &[RgbImage],
         text_boxes: &mut [TextBox],
     ) -> Result<Vec<TextBox>, InferenceError> {
-        let mut all_words = Vec::new();
-        let mut current_offset = 0;
+        self.get_texts_internal(part_imgs, text_boxes, 0)
+    }
 
-        for (i, img) in part_imgs.iter().enumerate() {
-            if i < text_boxes.len() {
-                let (words, new_offset) = self.get_text(img, &mut text_boxes[i], current_offset)?;
-                if let Some(ref text) = text_boxes[i].text {
-                    let length = text.len();
-                    text_boxes[i].span = Some(crate::document::text_box::DocumentSpan::new(
-                        current_offset,
-                        length,
-                    ));
-                }
-                current_offset = new_offset;
-                all_words.extend(words);
+    /// Internal batched text recognition implementation.
+    ///
+    /// Processes all images in a single forward pass by:
+    /// 1. Resizing all images to the target height while preserving aspect ratio
+    /// 2. Padding all images to the maximum width in the batch
+    /// 3. Stacking into a single batch tensor
+    /// 4. Running a single forward pass through the model
+    /// 5. Decoding each result with CTC and calculating word boundaries
+    ///
+    /// # Arguments
+    ///
+    /// * `part_imgs` - Slice of RGB images, one per text line
+    /// * `text_boxes` - Mutable slice of text boxes to update with results
+    /// * `initial_offset` - Starting character offset for span tracking
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<TextBox>)` - All word-level text boxes from all lines
+    /// * `Err(InferenceError)` - If recognition fails
+    fn get_texts_internal(
+        &mut self,
+        part_imgs: &[RgbImage],
+        text_boxes: &mut [TextBox],
+        initial_offset: usize,
+    ) -> Result<Vec<TextBox>, InferenceError> {
+        if part_imgs.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let batch_size = part_imgs.len().min(text_boxes.len());
+        if batch_size == 0 {
+            return Ok(Vec::new());
+        }
+
+        let resized_images: Vec<RgbImage> = part_imgs
+            .iter()
+            .take(batch_size)
+            .map(|img| {
+                let scale = self.dst_height as f32 / img.height() as f32;
+                let dst_width = (img.width() as f32 * scale) as u32;
+                imageops::resize(
+                    img,
+                    dst_width,
+                    self.dst_height,
+                    imageops::FilterType::Lanczos3,
+                )
+            })
+            .collect();
+
+        let original_widths: Vec<u32> = resized_images.iter().map(|img| img.width()).collect();
+        let max_width = original_widths.iter().copied().max().unwrap_or(1);
+
+        let normalized_arrays: Vec<_> = resized_images
+            .iter()
+            .map(|img| {
+                let padded = Self::pad_image(img, max_width);
+                image_utils::subtract_mean_normalize(&padded, &self.mean_values, &self.norm_values)
+            })
+            .collect();
+
+        let batch_array = Self::stack_arrays(&normalized_arrays)?;
+
+        let shape = batch_array.shape().to_vec();
+        let (data, _offset) = batch_array.into_raw_vec_and_offset();
+        let input_value = Value::from_array((shape.as_slice(), data)).map_err(|e| {
+            InferenceError::PreprocessingError {
+                operation: "create batched input value".to_string(),
+                message: e.to_string(),
             }
+        })?;
+
+        let (output_data, output_shape) = {
+            let outputs = self
+                .session
+                .run(inputs!["x" => input_value])
+                .map_err(|source| InferenceError::ModelExecutionError {
+                    operation: "CrnnNet batched forward pass".to_string(),
+                    source,
+                })?;
+
+            let output_tensor = outputs
+                .get("fetch_name_0")
+                .ok_or_else(|| InferenceError::PredictionError {
+                    operation: "get model outputs".to_string(),
+                    message: "Output 'fetch_name_0' not found".to_string(),
+                })?
+                .try_extract_tensor::<f32>()
+                .map_err(|source| InferenceError::PredictionError {
+                    operation: "extract output tensor".to_string(),
+                    message: source.to_string(),
+                })?;
+
+            (output_tensor.1.to_vec(), output_tensor.0.clone())
+        };
+
+        let seq_len = output_shape[1] as usize;
+        let vocab_size = output_shape[2] as usize;
+        let output_batch_size = output_shape[0] as usize;
+
+        let mut all_words = Vec::new();
+        let mut current_offset = initial_offset;
+
+        for i in 0..output_batch_size.min(batch_size) {
+            let item_start = i * seq_len * vocab_size;
+            let item_end = (i + 1) * seq_len * vocab_size;
+            let item_output = &output_data[item_start..item_end];
+
+            let width_ratio = original_widths[i] as f32 / max_width as f32;
+            let effective_seq_len = ((seq_len as f32) * width_ratio).ceil() as usize;
+
+            let (text, score, words, new_offset) = self.score_to_text(
+                item_output,
+                effective_seq_len,
+                vocab_size,
+                &text_boxes[i],
+                current_offset,
+            )?;
+
+            text_boxes[i].text = Some(text.clone());
+            text_boxes[i].text_score = score;
+            text_boxes[i].span = Some(crate::document::text_box::DocumentSpan::new(
+                current_offset,
+                text.len(),
+            ));
+
+            current_offset = new_offset;
+            all_words.extend(words);
         }
 
         Ok(all_words)
+    }
+
+    /// Stacks multiple 3D arrays into a single 4D batch array.
+    ///
+    /// Takes normalized image arrays of shape [C, H, W] and stacks them
+    /// into a batch tensor of shape [N, C, H, W].
+    ///
+    /// # Arguments
+    ///
+    /// * `arrays` - Slice of 4D arrays (each [1, C, H, W]) to concatenate
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Array4<f32>)` - Concatenated 4D array [N, C, H, W]
+    /// * `Err(InferenceError)` - If arrays have inconsistent shapes
+    fn stack_arrays(arrays: &[Array4<f32>]) -> Result<Array4<f32>, InferenceError> {
+        if arrays.is_empty() {
+            return Err(InferenceError::PreprocessingError {
+                operation: "stack arrays".to_string(),
+                message: "Cannot stack empty array list".to_string(),
+            });
+        }
+
+        let shape = arrays[0].shape();
+        let (c, h, w) = (shape[1], shape[2], shape[3]);
+        let batch_size = arrays.len();
+
+        let mut batch = Array4::<f32>::zeros((batch_size, c, h, w));
+
+        for (i, arr) in arrays.iter().enumerate() {
+            let view = arr.index_axis(Axis(0), 0);
+            batch.index_axis_mut(Axis(0), i).assign(&view);
+        }
+
+        Ok(batch)
     }
 }
