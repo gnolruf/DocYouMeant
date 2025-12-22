@@ -2,16 +2,16 @@
 
 use image::{imageops, ImageBuffer, Rgb, RgbImage};
 use imageproc::geometric_transformations::{warp, Interpolation, Projection};
-use ndarray::{Array, Array4};
+use ndarray::{Array, Array4, Axis};
 
 use crate::document::text_box::Orientation;
 use crate::document::text_box::TextBox;
 use crate::utils::error::ImageError;
 
-/// Adds padding around an image with a white background.
+/// Adds padding around an image with a specified background color.
 ///
 /// Creates a new image with the specified padding added to each side,
-/// filling the padded areas with white pixels (RGB 255, 255, 255).
+/// filling the padded areas with the specified color.
 ///
 /// # Arguments
 ///
@@ -20,10 +20,11 @@ use crate::utils::error::ImageError;
 /// * `padding_bottom` - The number of pixels to add to the bottom edge.
 /// * `padding_left` - The number of pixels to add to the left edge.
 /// * `padding_right` - The number of pixels to add to the right edge.
+/// * `pad_color` - The RGB color to use for padding. Defaults to white (255, 255, 255) if `None`.
 ///
 /// # Returns
 ///
-/// A new [`RgbImage`] with the original image centered and surrounded by white padding.
+/// A new [`RgbImage`] with the original image centered and surrounded by padding.
 /// If all padding values are zero, returns a clone of the original image.
 pub fn add_image_padding(
     image: &RgbImage,
@@ -31,10 +32,13 @@ pub fn add_image_padding(
     padding_bottom: u32,
     padding_left: u32,
     padding_right: u32,
+    pad_color: Option<Rgb<u8>>,
 ) -> RgbImage {
     if padding_top == 0 && padding_bottom == 0 && padding_left == 0 && padding_right == 0 {
         return image.clone();
     }
+
+    let color = pad_color.unwrap_or(Rgb([255u8, 255u8, 255u8]));
 
     let original_width = image.width();
     let original_height = image.height();
@@ -44,7 +48,7 @@ pub fn add_image_padding(
     let mut padded_img: RgbImage = ImageBuffer::new(new_width, new_height);
 
     for pixel in padded_img.pixels_mut() {
-        *pixel = Rgb([255u8, 255u8, 255u8]);
+        *pixel = color;
     }
 
     for y in 0..original_height {
@@ -325,4 +329,38 @@ pub fn get_image_parts(
     }
 
     Ok(part_images)
+}
+
+/// Stacks multiple 4D arrays into a single 4D batch array.
+///
+/// Takes normalized image arrays of shape `[1, C, H, W]` and concatenates them
+/// into a batch tensor of shape `[N, C, H, W]`.
+///
+/// # Arguments
+///
+/// * `arrays` - Slice of 4D arrays (each `[1, C, H, W]`) to concatenate
+///
+/// # Returns
+///
+/// * `Ok(Array4<f32>)` - Concatenated 4D array `[N, C, H, W]`
+/// * `Err(ImageError)` - If arrays slice is empty or arrays have inconsistent shapes
+pub fn stack_arrays(arrays: &[Array4<f32>]) -> Result<Array4<f32>, ImageError> {
+    if arrays.is_empty() {
+        return Err(ImageError::InvalidInput {
+            message: "Cannot stack empty array list".to_string(),
+        });
+    }
+
+    let shape = arrays[0].shape();
+    let (c, h, w) = (shape[1], shape[2], shape[3]);
+    let batch_size = arrays.len();
+
+    let mut batch = Array4::<f32>::zeros((batch_size, c, h, w));
+
+    for (i, arr) in arrays.iter().enumerate() {
+        let view = arr.index_axis(Axis(0), 0);
+        batch.index_axis_mut(Axis(0), i).assign(&view);
+    }
+
+    Ok(batch)
 }

@@ -183,8 +183,14 @@ impl DBNet {
         let final_width = resized_width + pad_width_total;
         let final_height = resized_height + pad_height_total;
 
-        let padded_final_img =
-            image_utils::add_image_padding(&resized_img, pad_top, pad_bottom, pad_left, pad_right);
+        let padded_final_img = image_utils::add_image_padding(
+            &resized_img,
+            pad_top,
+            pad_bottom,
+            pad_left,
+            pad_right,
+            None,
+        );
 
         self.src_dimensions = [width, height];
         self.dst_dimensions = [final_width as i32, final_height as i32];
