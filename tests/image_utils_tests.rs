@@ -20,7 +20,7 @@ fn test_add_image_padding() {
         *pixel = Rgb([0, 0, 0]); // Black image
     }
 
-    let padded = add_image_padding(&img, 2, 2, 2, 2);
+    let padded = add_image_padding(&img, 2, 2, 2, 2, None);
 
     assert_eq!(padded.width(), 14);
     assert_eq!(padded.height(), 14);
@@ -38,7 +38,7 @@ fn test_add_image_padding_zero() {
     let width = 10;
     let height = 10;
     let img: RgbImage = ImageBuffer::new(width, height);
-    let padded = add_image_padding(&img, 0, 0, 0, 0);
+    let padded = add_image_padding(&img, 0, 0, 0, 0, None);
 
     assert_eq!(padded.width(), 10);
     assert_eq!(padded.height(), 10);
@@ -51,7 +51,7 @@ fn test_add_image_padding_asymmetric() {
     let img: RgbImage = ImageBuffer::new(width, height);
 
     // Asymmetric padding: more on right and bottom
-    let padded = add_image_padding(&img, 1, 5, 2, 8);
+    let padded = add_image_padding(&img, 1, 5, 2, 8, None);
 
     assert_eq!(padded.width(), 10 + 2 + 8); // 20
     assert_eq!(padded.height(), 10 + 1 + 5); // 16
@@ -62,7 +62,7 @@ fn test_add_image_padding_single_pixel() {
     let mut img: RgbImage = ImageBuffer::new(1, 1);
     img.put_pixel(0, 0, Rgb([128, 64, 32]));
 
-    let padded = add_image_padding(&img, 1, 1, 1, 1);
+    let padded = add_image_padding(&img, 1, 1, 1, 1, None);
 
     assert_eq!(padded.width(), 3);
     assert_eq!(padded.height(), 3);
@@ -78,7 +78,7 @@ fn test_add_image_padding_single_pixel() {
 #[test]
 fn test_add_image_padding_large_padding() {
     let img: RgbImage = ImageBuffer::new(5, 5);
-    let padded = add_image_padding(&img, 100, 100, 100, 100);
+    let padded = add_image_padding(&img, 100, 100, 100, 100, None);
 
     assert_eq!(padded.width(), 205);
     assert_eq!(padded.height(), 205);
@@ -92,7 +92,7 @@ fn test_add_image_padding_one_side_only() {
     }
 
     // Only pad top
-    let padded = add_image_padding(&img, 10, 0, 0, 0);
+    let padded = add_image_padding(&img, 10, 0, 0, 0, None);
 
     assert_eq!(padded.width(), 5);
     assert_eq!(padded.height(), 15);

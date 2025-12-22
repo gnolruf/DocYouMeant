@@ -9,7 +9,6 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 
 use image::{imageops, Rgb, RgbImage};
-use ndarray::{Array4, Axis};
 use ort::{inputs, session::Session, value::Value};
 
 use crate::document::bounds::Bounds;
@@ -49,9 +48,6 @@ pub struct Crnn {
 impl Crnn {
     /// Number of threads for ONNX Runtime inter-op parallelism.
     const NUM_THREADS: usize = 4;
-
-    /// Padding color for batched images (gray, matching normalization mean).
-    const PAD_COLOR: Rgb<u8> = Rgb([127, 127, 127]);
 
     /// Inserts special characters into the character dictionary.
     ///
@@ -125,29 +121,6 @@ impl Crnn {
             norm_values: [1.0 / 127.5, 1.0 / 127.5, 1.0 / 127.5],
             dst_height: 48,
         })
-    }
-
-    /// Pads an image to the target width with the padding color.
-    ///
-    /// Creates a new image of the target dimensions and copies the source
-    /// image into the left portion, leaving the right side padded.
-    ///
-    /// # Arguments
-    ///
-    /// * `src` - Source image to pad
-    /// * `target_width` - Desired width of the output image
-    ///
-    /// # Returns
-    ///
-    /// A new image with the source content left-aligned and padding on the right.
-    fn pad_image(src: &RgbImage, target_width: u32) -> RgbImage {
-        if src.width() >= target_width {
-            return src.clone();
-        }
-
-        let mut padded = RgbImage::from_pixel(target_width, src.height(), Self::PAD_COLOR);
-        imageops::replace(&mut padded, src, 0, 0);
-        padded
     }
 
     /// Recognizes text from a single text line image.
@@ -432,12 +405,25 @@ impl Crnn {
         let normalized_arrays: Vec<_> = resized_images
             .iter()
             .map(|img| {
-                let padded = Self::pad_image(img, max_width);
+                let padding_right = max_width.saturating_sub(img.width());
+                let padded = image_utils::add_image_padding(
+                    img,
+                    0,
+                    0,
+                    0,
+                    padding_right,
+                    Some(Rgb([127, 127, 127])),
+                );
                 image_utils::subtract_mean_normalize(&padded, &self.mean_values, &self.norm_values)
             })
             .collect();
 
-        let batch_array = Self::stack_arrays(&normalized_arrays)?;
+        let batch_array = image_utils::stack_arrays(&normalized_arrays).map_err(|e| {
+            InferenceError::PreprocessingError {
+                operation: "stack arrays".to_string(),
+                message: e.to_string(),
+            }
+        })?;
 
         let shape = batch_array.shape().to_vec();
         let (data, _offset) = batch_array.into_raw_vec_and_offset();
@@ -507,40 +493,5 @@ impl Crnn {
         }
 
         Ok(all_words)
-    }
-
-    /// Stacks multiple 3D arrays into a single 4D batch array.
-    ///
-    /// Takes normalized image arrays of shape [C, H, W] and stacks them
-    /// into a batch tensor of shape [N, C, H, W].
-    ///
-    /// # Arguments
-    ///
-    /// * `arrays` - Slice of 4D arrays (each [1, C, H, W]) to concatenate
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(Array4<f32>)` - Concatenated 4D array [N, C, H, W]
-    /// * `Err(InferenceError)` - If arrays have inconsistent shapes
-    fn stack_arrays(arrays: &[Array4<f32>]) -> Result<Array4<f32>, InferenceError> {
-        if arrays.is_empty() {
-            return Err(InferenceError::PreprocessingError {
-                operation: "stack arrays".to_string(),
-                message: "Cannot stack empty array list".to_string(),
-            });
-        }
-
-        let shape = arrays[0].shape();
-        let (c, h, w) = (shape[1], shape[2], shape[3]);
-        let batch_size = arrays.len();
-
-        let mut batch = Array4::<f32>::zeros((batch_size, c, h, w));
-
-        for (i, arr) in arrays.iter().enumerate() {
-            let view = arr.index_axis(Axis(0), 0);
-            batch.index_axis_mut(Axis(0), i).assign(&view);
-        }
-
-        Ok(batch)
     }
 }
