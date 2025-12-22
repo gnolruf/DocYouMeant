@@ -160,37 +160,28 @@ impl Crnn {
     ///
     /// * `src` - RGB image of the text line (will be resized internally)
     /// * `text_box` - Text box to update with recognition results
-    /// * `global_offset` - Character offset in the document for span calculation
     ///
     /// # Returns
     ///
-    /// * `Ok((words, new_offset))` - Vector of word-level TextBoxes and updated global offset
+    /// * `Ok(words)` - Vector of word-level TextBoxes
     /// * `Err(InferenceError)` - If recognition fails
     pub fn get_text(
         &mut self,
         src: &RgbImage,
         text_box: &mut TextBox,
-        global_offset: usize,
-    ) -> Result<(Vec<TextBox>, usize), InferenceError> {
+    ) -> Result<Vec<TextBox>, InferenceError> {
         let images = vec![src.clone()];
         let mut text_boxes = vec![text_box.clone()];
 
-        let words = self.get_texts_internal(&images, &mut text_boxes, global_offset)?;
+        let words = self.get_texts(&images, &mut text_boxes)?;
 
-        // Copy results back to the original text_box
         if let Some(result) = text_boxes.first() {
             text_box.text = result.text.clone();
             text_box.text_score = result.text_score;
             text_box.span = result.span;
         }
 
-        let new_offset = text_boxes
-            .first()
-            .and_then(|tb| tb.span.as_ref())
-            .map(|span| span.offset + span.length)
-            .unwrap_or(global_offset);
-
-        Ok((words, new_offset))
+        Ok(words)
     }
 
     /// Converts model output scores to recognized text with word segmentation.
@@ -392,10 +383,10 @@ impl Crnn {
 
     /// Recognizes text from multiple text line images in batch.
     ///
-    /// Processes multiple cropped text line images in a single batched forward pass
+    /// Processes multiple cropped text line images in a single batched forward pass.
     /// Images are padded to uniform width before batching.
     /// Maintains a consistent global character offset across all lines for
-    /// document-wide span tracking.
+    /// document-wide span tracking, starting from offset 0.
     ///
     /// # Arguments
     ///
@@ -410,34 +401,6 @@ impl Crnn {
         &mut self,
         part_imgs: &[RgbImage],
         text_boxes: &mut [TextBox],
-    ) -> Result<Vec<TextBox>, InferenceError> {
-        self.get_texts_internal(part_imgs, text_boxes, 0)
-    }
-
-    /// Internal batched text recognition implementation.
-    ///
-    /// Processes all images in a single forward pass by:
-    /// 1. Resizing all images to the target height while preserving aspect ratio
-    /// 2. Padding all images to the maximum width in the batch
-    /// 3. Stacking into a single batch tensor
-    /// 4. Running a single forward pass through the model
-    /// 5. Decoding each result with CTC and calculating word boundaries
-    ///
-    /// # Arguments
-    ///
-    /// * `part_imgs` - Slice of RGB images, one per text line
-    /// * `text_boxes` - Mutable slice of text boxes to update with results
-    /// * `initial_offset` - Starting character offset for span tracking
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(Vec<TextBox>)` - All word-level text boxes from all lines
-    /// * `Err(InferenceError)` - If recognition fails
-    fn get_texts_internal(
-        &mut self,
-        part_imgs: &[RgbImage],
-        text_boxes: &mut [TextBox],
-        initial_offset: usize,
     ) -> Result<Vec<TextBox>, InferenceError> {
         if part_imgs.is_empty() {
             return Ok(Vec::new());
@@ -514,7 +477,7 @@ impl Crnn {
         let output_batch_size = output_shape[0] as usize;
 
         let mut all_words = Vec::new();
-        let mut current_offset = initial_offset;
+        let mut current_offset = 0;
 
         for i in 0..output_batch_size.min(batch_size) {
             let item_start = i * seq_len * vocab_size;

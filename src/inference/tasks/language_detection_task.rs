@@ -197,7 +197,7 @@ impl LanguageDetectionTask {
 
         for (text_box, image) in samples {
             let mut text_box_clone = (*text_box).clone();
-            let (_, _) = crnn.get_text(image, &mut text_box_clone, 0)?;
+            let _ = crnn.get_text(image, &mut text_box_clone)?;
 
             if let Some(text) = &text_box_clone.text {
                 recognized_texts.push(text.clone());
