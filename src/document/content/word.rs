@@ -184,9 +184,7 @@ fn get_grid_span(property: &docx_rs::TableCellProperty) -> usize {
 /// Converts a docx-rs table to the internal [`Table`] representation.
 ///
 /// Creates table cells with proper row/column indices and span information
-/// based on the document structure. All bounds are set to zero using
-/// [`Bounds::zero()`] since Word documents store structural data rather
-/// than geometric positioning.
+/// based on the document structure.
 ///
 /// # Arguments
 ///
@@ -197,7 +195,7 @@ fn get_grid_span(property: &docx_rs::TableCellProperty) -> usize {
 ///
 /// A [`Table`] instance with:
 /// - Cells populated with row/column indices and content
-/// - `table_type` set to [`TableType::Wired`] (most Word tables have borders)
+/// - `table_type` set to [`TableType::Docx`]
 /// - `confidence` set to `1.0` (direct extraction)
 /// - All bounds set to zero coordinates
 fn convert_docx_table(docx_table: &docx_rs::Table, page_number: usize) -> Table {
@@ -247,7 +245,7 @@ fn convert_docx_table(docx_table: &docx_rs::Table, page_number: usize) -> Table 
 
     Table {
         bounds: Bounds::zero(),
-        table_type: TableType::Wired,
+        table_type: TableType::Docx,
         row_count,
         column_count: max_columns,
         cells,
