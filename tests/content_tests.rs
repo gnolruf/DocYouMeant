@@ -29,10 +29,7 @@ fn test_word_document_content() {
 
     let content = doc.content().unwrap();
     assert_eq!(doc.doc_type(), &DocumentType::Word);
-    assert!(content
-        .get_text()
-        .unwrap()
-        .contains("This is a test document!"));
+    assert!(content.get_text().unwrap().contains("Sample Document"));
     assert!(HashSet::<Modality>::from(doc.doc_type().clone()).contains(&Modality::Text));
 }
 
