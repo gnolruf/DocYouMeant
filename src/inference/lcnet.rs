@@ -12,6 +12,7 @@ use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
 use once_cell::sync::OnceCell;
 use ort::{inputs, session::Session, value::Value};
 use std::sync::Mutex;
+use tracing::{error, warn};
 
 use crate::document::table::TableType;
 use crate::document::text_box::Orientation;
@@ -280,7 +281,6 @@ impl LCNet {
         })?;
 
         let outputs = self.session.run(inputs!["x" => input_value]).map_err(|e| {
-            println!("Error running the session: {e:?}");
             InferenceError::ModelExecutionError {
                 operation: "AngleNet forward pass".to_string(),
                 source: e,
@@ -380,7 +380,6 @@ impl LCNet {
         })?;
 
         let outputs = self.session.run(inputs!["x" => input_value]).map_err(|e| {
-            println!("Error running the session: {e:?}");
             InferenceError::ModelExecutionError {
                 operation: "TableClassification forward pass".to_string(),
                 source: e,
@@ -443,13 +442,13 @@ impl LCNet {
 
         for (i, part_img) in part_imgs.iter().enumerate() {
             if part_img.width() == 0 || part_img.height() == 0 {
-                println!("Warning: Empty part image at index {i}, skipping");
+                warn!("Warning: Empty part image at index {i}, skipping");
                 angles.push(Orientation::Oriented0);
                 continue;
             }
 
             if part_img.width() < 2 || part_img.height() < 2 {
-                println!(
+                warn!(
                     "Warning: Part image at index {} is too small ({}x{}), skipping",
                     i,
                     part_img.width(),
@@ -464,14 +463,14 @@ impl LCNet {
                     match model.infer_angle(&resized_img, is_vertical) {
                         Ok(result) => result,
                         Err(e) => {
-                            println!("Error inferring angle for image {i}: {e:?}");
+                            error!("Error inferring angle for image {i}: {e:?}");
                             angles.push(Orientation::Oriented0);
                             continue;
                         }
                     }
                 }
                 Err(e) => {
-                    println!("Error preprocessing image {i}: {e:?}");
+                    error!("Error preprocessing image {i}: {e:?}");
                     angles.push(Orientation::Oriented0);
                     continue;
                 }
@@ -512,13 +511,13 @@ impl LCNet {
 
         for (i, table_img) in table_imgs.iter().enumerate() {
             if table_img.width() == 0 || table_img.height() == 0 {
-                println!("Warning: Empty table image at index {i}, skipping");
+                warn!("Warning: Empty table image at index {i}, skipping");
                 table_types.push(TableType::Wired); // Default to wired
                 continue;
             }
 
             if table_img.width() < 2 || table_img.height() < 2 {
-                println!(
+                warn!(
                     "Warning: Table image at index {} is too small ({}x{}), skipping",
                     i,
                     table_img.width(),
@@ -532,13 +531,13 @@ impl LCNet {
                 Ok((resized_img, _)) => match model.infer_table_type(&resized_img) {
                     Ok(result) => result,
                     Err(e) => {
-                        println!("Error inferring table type for image {i}: {e:?}");
+                        error!("Error inferring table type for image {i}: {e:?}");
                         table_types.push(TableType::Wired);
                         continue;
                     }
                 },
                 Err(e) => {
-                    println!("Error preprocessing table image {i}: {e:?}");
+                    error!("Error preprocessing table image {i}: {e:?}");
                     table_types.push(TableType::Wired);
                     continue;
                 }

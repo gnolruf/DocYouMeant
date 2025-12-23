@@ -115,10 +115,10 @@ impl AnalysisPipeline {
     ///
     /// A new `AnalysisPipeline` instance configured for the specified document type
     /// and processing mode.
-    pub fn new(document_type: DocumentType, process_id: String, language: Option<String>) -> Self {
+    pub fn new(document_type: DocumentType, process_id: &str, language: Option<String>) -> Self {
         Self {
             document_type,
-            process_mode: ProcessMode::from(process_id.as_str()),
+            process_mode: ProcessMode::from(process_id),
             language: std::cell::RefCell::new(language),
         }
     }
@@ -155,8 +155,8 @@ impl AnalysisPipeline {
                             self.process_pdf_with_embedded_text(image, page)?;
 
                         page.orientation = Some(orientation);
-                        page.layout_boxes = layout_boxes.clone();
-                        page.text_lines = text_lines.clone();
+                        page.layout_boxes.clone_from(&layout_boxes);
+                        page.text_lines.clone_from(&text_lines);
                         page.detected_language = Some(language);
                         page.tables = tables;
 
@@ -171,8 +171,8 @@ impl AnalysisPipeline {
                             self.process_image_document(image, page.page_number)?;
 
                         page.orientation = Some(orientation);
-                        page.layout_boxes = layout_boxes.clone();
-                        page.text_lines = text_lines.clone();
+                        page.layout_boxes.clone_from(&layout_boxes);
+                        page.text_lines.clone_from(&text_lines);
                         page.detected_language = Some(language);
                         page.tables = tables;
                         if !words.is_empty() {
@@ -199,8 +199,8 @@ impl AnalysisPipeline {
                         self.process_image_document(image, page.page_number)?;
 
                     page.orientation = Some(orientation);
-                    page.layout_boxes = layout_boxes.clone();
-                    page.text_lines = text_lines.clone();
+                    page.layout_boxes.clone_from(&layout_boxes);
+                    page.text_lines.clone_from(&text_lines);
                     page.detected_language = Some(language);
                     page.tables = tables;
                     if !words.is_empty() {
@@ -219,13 +219,7 @@ impl AnalysisPipeline {
                     page.question_answers = qa_results;
                 }
             }
-            DocumentType::Text | DocumentType::Word => {
-                if self.process_mode != ProcessMode::Read {
-                    let qa_results = self.answer_questions_for_page(page, questions)?;
-                    page.question_answers = qa_results;
-                }
-            }
-            DocumentType::Excel | DocumentType::Csv => {
+            DocumentType::Text | DocumentType::Word | DocumentType::Excel | DocumentType::Csv => {
                 if self.process_mode != ProcessMode::Read {
                     let qa_results = self.answer_questions_for_page(page, questions)?;
                     page.question_answers = qa_results;

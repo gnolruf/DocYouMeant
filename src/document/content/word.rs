@@ -2,7 +2,10 @@
 //!
 //! This module provides content extraction for Microsoft Word documents (`.docx`).
 
-use docx_rs::*;
+use docx_rs::{
+    Break, BreakType, DocumentChild, Paragraph, ParagraphChild, RunChild, TableCellContent,
+    TableChild, TableRowChild,
+};
 
 use super::super::error::DocumentError;
 use super::{DocumentContent, PageContent};

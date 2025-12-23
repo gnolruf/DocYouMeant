@@ -24,7 +24,7 @@ use crate::inference::error::InferenceError;
 const MAX_LENGTH: usize = 4096;
 
 /// Size of the Phi-4-mini-instruct vocabulary.
-const VOCAB_SIZE: usize = 200064;
+const VOCAB_SIZE: usize = 200_064;
 
 /// Singleton instance for the model.
 static PHI4MINI_INSTANCE: OnceCell<Mutex<Phi4MiniInference>> = OnceCell::new();
