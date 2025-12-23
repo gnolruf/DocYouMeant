@@ -589,6 +589,14 @@ impl AnalysisPipeline {
         let detection_mode = match table_type {
             TableType::Wired => RtDetrMode::WiredTableCell,
             TableType::Wireless => RtDetrMode::WirelessTableCell,
+            _ => {
+                return Err(DocumentError::ProcessingError {
+                    message: format!(
+                        "Unexpected table type {:?} for image-based cell detection",
+                        table_type
+                    ),
+                });
+            }
         };
 
         let result = RtDetr::run(table_image, detection_mode)

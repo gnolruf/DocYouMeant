@@ -21,6 +21,8 @@ pub enum TableType {
     Wired,
     /// A table without visible grid lines/borders.
     Wireless,
+    /// A table derived from a docx file.
+    Docx,
 }
 
 /// A single cell within a detected table.

@@ -51,6 +51,26 @@ impl Bounds {
         Self { coords }
     }
 
+    /// Creates a zero-sized `Bounds` with all coordinates at the origin.
+    ///
+    /// This is useful for document elements where geometric positioning is not
+    /// available.
+    ///
+    /// # Returns
+    ///
+    /// A `Bounds` instance with all four corners at `(0, 0)`.
+    #[inline]
+    pub fn zero() -> Self {
+        Self {
+            coords: [
+                Coord { x: 0, y: 0 },
+                Coord { x: 0, y: 0 },
+                Coord { x: 0, y: 0 },
+                Coord { x: 0, y: 0 },
+            ],
+        }
+    }
+
     /// Returns a reference to the underlying coordinate array.
     ///
     /// # Returns
