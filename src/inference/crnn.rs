@@ -143,18 +143,10 @@ impl Crnn {
         src: &RgbImage,
         text_box: &mut TextBox,
     ) -> Result<Vec<TextBox>, InferenceError> {
-        let images = vec![src.clone()];
-        let mut text_boxes = vec![text_box.clone()];
+        let images = std::slice::from_ref(src);
+        let text_boxes = std::slice::from_mut(text_box);
 
-        let words = self.get_texts(&images, &mut text_boxes)?;
-
-        if let Some(result) = text_boxes.first() {
-            text_box.text = result.text.clone();
-            text_box.text_score = result.text_score;
-            text_box.span = result.span;
-        }
-
-        Ok(words)
+        self.get_texts(images, text_boxes)
     }
 
     /// Converts model output scores to recognized text with word segmentation.
@@ -208,7 +200,7 @@ impl Crnn {
             let (max_index, max_value) = output_data[start..stop]
                 .iter()
                 .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                 .unwrap_or((0, &0.0));
 
             if max_index > 0 && max_index < self.keys.len() && !(i > 0 && max_index == last_index) {

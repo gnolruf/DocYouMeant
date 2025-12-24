@@ -162,6 +162,7 @@ impl LayoutBox {
     /// # Returns
     ///
     /// Returns the modified `LayoutBox` with the page number set.
+    #[must_use]
     pub fn with_page_number(mut self, page_number: usize) -> Self {
         self.page_number = Some(page_number);
         self
@@ -179,6 +180,7 @@ impl LayoutBox {
     /// # Returns
     ///
     /// Returns the modified `LayoutBox` with the content set.
+    #[must_use]
     pub fn with_content(mut self, content: String) -> Self {
         self.content = Some(content);
         self

@@ -139,7 +139,7 @@ pub fn apply_nms(
         return detections;
     }
 
-    detections.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
+    detections.sort_by(|a, b| b.2.total_cmp(&a.2));
 
     let mut keep = Vec::new();
     let mut suppressed = vec![false; detections.len()];

@@ -72,6 +72,7 @@ impl TableCell {
     /// - `row_index: 0`, `column_index: 0`
     /// - `row_span: 1`, `column_span: 1`
     /// - `content: None`
+    #[must_use]
     pub fn new(bounds: Bounds, confidence: f32) -> Self {
         Self {
             bounds,
@@ -206,6 +207,7 @@ impl Table {
     ///
     /// If `detected_cells` is empty, returns a table with `row_count: 0`,
     /// `column_count: 0`, and an empty `cells` vector.
+    #[must_use]
     pub fn from_cells(
         detected_cells: Vec<TableCell>,
         bounds: Bounds,

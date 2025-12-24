@@ -422,13 +422,16 @@ impl Phi4MiniInference {
                     message: format!("Failed to reshape logits: {e}"),
                 })?;
 
-            Ok(logits
+            let (token_idx, _) = logits
                 .slice(s![0, -1, ..VOCAB_SIZE])
                 .iter()
                 .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-                .unwrap()
-                .0 as i64)
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .ok_or_else(|| InferenceError::PredictionError {
+                    operation: "find max logit".to_string(),
+                    message: "Empty logits tensor".to_string(),
+                })?;
+            Ok(token_idx as i64)
         } else {
             let logits: ArrayView<f32, _> = logits_value
                 .try_extract_array::<f32>()
@@ -442,13 +445,16 @@ impl Phi4MiniInference {
                     message: format!("Failed to reshape logits: {e}"),
                 })?;
 
-            Ok(logits
+            let (token_idx, _) = logits
                 .slice(s![0, -1, ..VOCAB_SIZE])
                 .iter()
                 .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-                .unwrap()
-                .0 as i64)
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .ok_or_else(|| InferenceError::PredictionError {
+                    operation: "find max logit".to_string(),
+                    message: "Empty logits tensor".to_string(),
+                })?;
+            Ok(token_idx as i64)
         }
     }
 

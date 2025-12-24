@@ -97,8 +97,6 @@ pub struct AnalysisPipeline {
     document_type: DocumentType,
     /// The processing mode controlling analysis depth
     process_mode: ProcessMode,
-    /// Cached language for consistent processing across pages.
-    language: std::cell::RefCell<Option<String>>,
 }
 
 impl AnalysisPipeline {
@@ -108,19 +106,16 @@ impl AnalysisPipeline {
     ///
     /// * `document_type` - The type of document to be processed
     /// * `process_id` - A string identifier for the processing mode
-    /// * `language` - Optional language code to use for text recognition.
-    ///   If none provided, the language will be auto-detected.
     ///
     /// # Returns
     ///
     /// A new `AnalysisPipeline` instance configured for the specified document type
     /// and processing mode.
     #[must_use]
-    pub fn new(document_type: DocumentType, process_id: &str, language: Option<String>) -> Self {
+    pub fn new(document_type: DocumentType, process_id: &str) -> Self {
         Self {
             document_type,
             process_mode: ProcessMode::from(process_id),
-            language: std::cell::RefCell::new(language),
         }
     }
 
@@ -132,16 +127,20 @@ impl AnalysisPipeline {
     ///   written directly to this structure.
     /// * `questions` - Slice of questions to answer based on page content.
     ///   Ignored in Read mode.
+    /// * `language_cache` - Mutable reference to the cached language. If `Some`,
+    ///   this language will be used; otherwise language detection runs and the
+    ///   result is cached here for subsequent pages.
     ///
     /// # Returns
     ///
     /// - `Ok(())` on successful processing
     /// - `Err(DocumentError)` if any processing step fails
-    #[instrument(skip(self, page, questions), fields(page_number = page.page_number))]
+    #[instrument(skip(self, page, questions, language_cache), fields(page_number = page.page_number))]
     pub fn process_page(
         &self,
         page: &mut PageContent,
         questions: &[String],
+        language_cache: &mut Option<String>,
     ) -> Result<(), DocumentError> {
         debug!(
             "Processing page {} with mode {:?}",
@@ -153,7 +152,7 @@ impl AnalysisPipeline {
                     if page.has_embedded_text_data() {
                         debug!("Processing PDF with embedded text");
                         let (text_lines, layout_boxes, tables, orientation, language) =
-                            self.process_pdf_with_embedded_text(image, page)?;
+                            self.process_pdf_with_embedded_text(image, page, language_cache)?;
 
                         page.orientation = Some(orientation);
                         page.layout_boxes.clone_from(&layout_boxes);
@@ -169,7 +168,7 @@ impl AnalysisPipeline {
                     } else {
                         debug!("Processing PDF as image");
                         let (text_lines, words, layout_boxes, tables, orientation, language) =
-                            self.process_image_document(image, page.page_number)?;
+                            self.process_image_document(image, page.page_number, language_cache)?;
 
                         page.orientation = Some(orientation);
                         page.layout_boxes.clone_from(&layout_boxes);
@@ -197,7 +196,7 @@ impl AnalysisPipeline {
                 debug!("Processing image document");
                 if let Some(ref image) = page.image {
                     let (text_lines, words, layout_boxes, tables, orientation, language) =
-                        self.process_image_document(image, page.page_number)?;
+                        self.process_image_document(image, page.page_number, language_cache)?;
 
                     page.orientation = Some(orientation);
                     page.layout_boxes.clone_from(&layout_boxes);
@@ -623,11 +622,12 @@ impl AnalysisPipeline {
     /// # Errors
     ///
     /// Returns an error if any model inference step fails.
-    #[instrument(skip(self, image, page))]
+    #[instrument(skip(self, image, page, language_cache))]
     fn process_pdf_with_embedded_text(
         &self,
         image: &RgbImage,
         page: &PageContent,
+        language_cache: &mut Option<String>,
     ) -> Result<PdfProcessingResult, DocumentError> {
         let document_orientation = Self::get_document_orientation(image, page.orientation)?;
         debug!("Document orientation: {:?}", document_orientation);
@@ -644,11 +644,10 @@ impl AnalysisPipeline {
         Self::match_embedded_text_to_lines(&mut text_lines, &page.words);
         debug!("Matched embedded text to lines");
 
-        let cached_language = self.language.borrow().clone();
-        let language = match cached_language {
+        let language = match language_cache {
             Some(lang) => {
                 debug!("Using provided/cached language: {}", lang);
-                lang
+                lang.clone()
             }
             None => {
                 debug!("No language provided, running language detection on embedded text");
@@ -660,7 +659,7 @@ impl AnalysisPipeline {
                     "Detected language from embedded text: {}",
                     detection_result.language
                 );
-                *self.language.borrow_mut() = Some(detection_result.language.clone());
+                *language_cache = Some(detection_result.language.clone());
                 detection_result.language
             }
         };
@@ -769,11 +768,12 @@ impl AnalysisPipeline {
     /// - Model inference failures
     /// - Image cropping/rotation errors
     /// - Text recognition failures
-    #[instrument(skip(self, image))]
+    #[instrument(skip(self, image, language_cache))]
     fn process_image_document(
         &self,
         image: &RgbImage,
         page_number: usize,
+        language_cache: &mut Option<String>,
     ) -> Result<ImageProcessingResult, DocumentError> {
         let document_orientation = Self::get_document_orientation(image, None)?;
         debug!("Document orientation: {:?}", document_orientation);
@@ -817,11 +817,10 @@ impl AnalysisPipeline {
 
         let rotated_parts = image_utils::rotate_images_by_angle(&image_parts, &text_lines);
 
-        let cached_language = self.language.borrow().clone();
-        let language = match cached_language {
+        let language = match language_cache {
             Some(lang) => {
-                debug!("Using provided/cached language: {}", lang);
-                lang
+                debug!("Using provided language: {}", lang);
+                lang.clone()
             }
             None => {
                 debug!("No language provided, running language detection");
@@ -832,7 +831,7 @@ impl AnalysisPipeline {
                     "Detected language: {} (confidence: {:.2})",
                     detection_result.language, detection_result.confidence
                 );
-                *self.language.borrow_mut() = Some(detection_result.language.clone());
+                *language_cache = Some(detection_result.language.clone());
                 detection_result.language
             }
         };
@@ -879,6 +878,9 @@ impl AnalysisPipeline {
     ///   Results are written directly to the page structures.
     /// * `questions` - Slice of questions to answer based on document content.
     ///   The same questions are asked for each page.
+    /// * `language` - Optional language code to use for text recognition.
+    ///   If `None`, the language will be auto-detected on the first page
+    ///   and cached for subsequent pages.
     ///
     /// # Returns
     ///
@@ -894,16 +896,18 @@ impl AnalysisPipeline {
         &self,
         content: &mut dyn DocumentContent,
         questions: &[String],
+        language: Option<String>,
     ) -> Result<
         Vec<crate::inference::tasks::question_and_answer_task::QuestionAndAnswerResult>,
         DocumentError,
     > {
         info!("Starting document analysis");
         let mut all_qa_results = Vec::new();
+        let mut language_cache = language;
 
         let pages = content.get_pages_mut();
         for page in pages {
-            self.process_page(page, questions)?;
+            self.process_page(page, questions, &mut language_cache)?;
 
             all_qa_results.extend(page.question_answers.clone());
         }

@@ -38,6 +38,7 @@ impl QuestionAndAnswerResult {
     /// # Returns
     ///
     /// A new `QuestionAndAnswerResult` with no confidence score.
+    #[must_use]
     pub fn new(question: String, answer: String) -> Self {
         Self {
             question,

@@ -144,8 +144,7 @@ impl Document {
     ) -> Result<(), DocumentError> {
         self.process_id = process_id.to_string();
         let doc_type = self.doc_type.clone();
-        let pipeline =
-            AnalysisPipeline::new(doc_type, &self.process_id, language.map(String::from));
+        let pipeline = AnalysisPipeline::new(doc_type, &self.process_id);
 
         let content = match self.content_mut() {
             Some(content) => content,
@@ -155,7 +154,7 @@ impl Document {
         };
 
         let questions = questions.unwrap_or(&[]);
-        let question_answers = pipeline.analyze(content, questions)?;
+        let question_answers = pipeline.analyze(content, questions, language.map(String::from))?;
 
         self.question_answers = question_answers;
 

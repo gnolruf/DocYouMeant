@@ -65,6 +65,7 @@ impl DocumentType {
     /// # Returns
     ///
     /// `Some(DocumentType)` if the extension is recognized, `None` otherwise.
+    #[must_use]
     pub fn from_extension(ext: &str) -> Option<Self> {
         Self::supported_types()
             .into_iter()

@@ -224,6 +224,7 @@ impl ErrorResponse {
     /// # Arguments
     ///
     /// * `error` - The error message to include in the response.
+    #[must_use]
     pub fn new(error: impl Into<String>) -> Self {
         Self {
             status: "error".to_string(),
@@ -239,6 +240,7 @@ impl ErrorResponse {
     /// # Arguments
     ///
     /// * `details` - Additional context or details about the error.
+    #[must_use]
     pub fn with_details(mut self, details: impl Into<String>) -> Self {
         self.details = Some(details.into());
         self

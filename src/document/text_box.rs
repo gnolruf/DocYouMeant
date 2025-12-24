@@ -76,6 +76,7 @@ impl Orientation {
     ///
     /// Returns `Some(Orientation)` if the rounded angle matches a cardinal
     /// direction exactly, or `None` for non-cardinal angles.
+    #[must_use]
     pub fn from_rotation_degrees(degrees: f32) -> Option<Self> {
         let normalized = ((degrees % 360.0) + 360.0) % 360.0;
 

@@ -116,6 +116,7 @@ impl AnalysisResult {
     /// # Returns
     ///
     /// The modified `AnalysisResult` with metadata set.
+    #[must_use]
     pub fn with_metadata(mut self, metadata: HashMap<String, serde_json::Value>) -> Self {
         self.metadata = Some(metadata);
         self
@@ -130,6 +131,7 @@ impl AnalysisResult {
     /// # Returns
     ///
     /// The modified `AnalysisResult` with content set.
+    #[must_use]
     pub fn with_content(mut self, content: String) -> Self {
         self.content = content;
         self

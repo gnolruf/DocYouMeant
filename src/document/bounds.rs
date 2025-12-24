@@ -47,6 +47,7 @@ impl Bounds {
     ///
     /// * `coords` - Four corner points in order: `[top-left, top-right, bottom-right, bottom-left]`
     #[inline]
+    #[must_use]
     pub fn new(coords: [Coord<i32>; 4]) -> Self {
         Self { coords }
     }
@@ -60,6 +61,7 @@ impl Bounds {
     ///
     /// A `Bounds` instance with all four corners at `(0, 0)`.
     #[inline]
+    #[must_use]
     pub fn zero() -> Self {
         Self {
             coords: [

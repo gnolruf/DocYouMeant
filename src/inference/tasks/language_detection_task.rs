@@ -57,6 +57,7 @@ impl LanguageDetectionResult {
     /// # Returns
     ///
     /// A new `LanguageDetectionResult` instance.
+    #[must_use]
     pub fn new(language: String, model_file: String, confidence: f32) -> Self {
         Self {
             language,
