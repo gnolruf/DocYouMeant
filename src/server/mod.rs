@@ -16,12 +16,6 @@ use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
-use crate::inference::crnn::Crnn;
-use crate::inference::dbnet::DBNet;
-use crate::inference::lcnet::{LCNet, LCNetMode};
-use crate::inference::rtdetr::{RtDetr, RtDetrMode};
-use crate::inference::tasks::question_and_answer_task::QuestionAndAnswerTask;
-
 /// Creates and configures the Axum router with all API routes.
 ///
 /// This function sets up the complete routing configuration including:
@@ -39,54 +33,6 @@ pub fn create_app() -> Router {
         .route("/api/v1/analyze", post(handlers::analyze_document))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
-}
-
-/// Preloads all machine learning models into memory.
-///
-/// This function initializes and caches all inference models used by the
-/// document analysis pipeline. Calling this at server startup ensures that
-/// the first request doesn't incur model loading latency.
-///
-/// # Arguments
-///
-/// * `ocr_language` - Optional language code for the OCR model to preload.
-pub async fn initialize_models(
-    ocr_language: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    tracing::info!("Preloading models...");
-
-    tracing::info!("  Loading DBNet (text detection)...");
-    DBNet::get_or_init()?;
-
-    tracing::info!("  Loading LCNet (document orientation)...");
-    LCNet::get_or_init(LCNetMode::DocumentOrientation)?;
-
-    tracing::info!("  Loading LCNet (text orientation)...");
-    LCNet::get_or_init(LCNetMode::TextOrientation)?;
-
-    tracing::info!("  Loading LCNet (table type classification)...");
-    LCNet::get_or_init(LCNetMode::TableType)?;
-
-    tracing::info!("  Loading RtDetr (layout detection)...");
-    RtDetr::get_or_init(RtDetrMode::Layout)?;
-
-    tracing::info!("  Loading RtDetr (wired table cell detection)...");
-    RtDetr::get_or_init(RtDetrMode::WiredTableCell)?;
-
-    tracing::info!("  Loading RtDetr (wireless table cell detection)...");
-    RtDetr::get_or_init(RtDetrMode::WirelessTableCell)?;
-
-    tracing::info!("  Loading Phi4Mini (language model)...");
-    QuestionAndAnswerTask::get_or_init()?;
-
-    if let Some(language) = ocr_language {
-        tracing::info!("  Loading Crnn ({} text recognition)...", language);
-        let _ = Crnn::new(language)?;
-    }
-
-    tracing::info!("All models preloaded successfully.");
-
-    Ok(())
 }
 
 /// Starts the HTTP server and listens for incoming requests.
