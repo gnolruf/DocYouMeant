@@ -1,10 +1,6 @@
 use clap::Parser;
+use docyoumeant::server;
 use std::env;
-
-mod document;
-mod inference;
-mod server;
-mod utils;
 
 #[derive(Parser, Debug)]
 #[command(name = "docyoumeant")]

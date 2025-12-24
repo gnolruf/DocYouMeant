@@ -631,12 +631,28 @@ impl Phi4MiniInference {
                 }
             })?;
 
-            let logits_value = outputs.remove("logits").unwrap();
+            let logits_value =
+                outputs
+                    .remove("logits")
+                    .ok_or_else(|| InferenceError::ProcessingError {
+                        message: "Missing output 'logits'".to_string(),
+                    })?;
 
             let mut new_past_key_values = Vec::with_capacity(64);
             for i in 0..32 {
-                new_past_key_values.push(outputs.remove(format!("present.{}.key", i)).unwrap());
-                new_past_key_values.push(outputs.remove(format!("present.{}.value", i)).unwrap());
+                let key_name = format!("present.{}.key", i);
+                let value_name = format!("present.{}.value", i);
+
+                new_past_key_values.push(outputs.remove(&key_name).ok_or_else(|| {
+                    InferenceError::ProcessingError {
+                        message: format!("Missing output '{}'", key_name),
+                    }
+                })?);
+                new_past_key_values.push(outputs.remove(&value_name).ok_or_else(|| {
+                    InferenceError::ProcessingError {
+                        message: format!("Missing output '{}'", value_name),
+                    }
+                })?);
             }
 
             drop(outputs);

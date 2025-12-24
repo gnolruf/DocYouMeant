@@ -209,34 +209,40 @@ impl Crnn {
                 str_res.push_str(char_str);
 
                 if char_str == " " {
-                    if !current_word.is_empty() && word_start_pos.is_some() {
-                        let word_bounds =
-                            self.calculate_word_bounds(text_box, word_start_pos.unwrap(), i - 1, h);
+                    let mut processed = false;
+                    if !current_word.is_empty() {
+                        if let Some(start_pos) = word_start_pos {
+                            let word_bounds =
+                                self.calculate_word_bounds(text_box, start_pos, i - 1, h);
 
-                        let word_score = if word_scores.is_empty() {
-                            0.0
-                        } else {
-                            word_scores.iter().sum::<f32>() / word_scores.len() as f32
-                        };
+                            let word_score = if word_scores.is_empty() {
+                                0.0
+                            } else {
+                                word_scores.iter().sum::<f32>() / word_scores.len() as f32
+                            };
 
-                        let word_len = current_word.len();
-                        words.push(TextBox {
-                            text: Some(current_word.clone()),
-                            bounds: Bounds::new(word_bounds),
-                            angle: text_box.angle,
-                            box_score: word_score,
-                            text_score: word_score,
-                            span: Some(crate::document::text_box::DocumentSpan::new(
-                                global_offset,
-                                word_len,
-                            )),
-                        });
+                            let word_len = current_word.len();
+                            words.push(TextBox {
+                                text: Some(current_word.clone()),
+                                bounds: Bounds::new(word_bounds),
+                                angle: text_box.angle,
+                                box_score: word_score,
+                                text_score: word_score,
+                                span: Some(crate::document::text_box::DocumentSpan::new(
+                                    global_offset,
+                                    word_len,
+                                )),
+                            });
 
-                        global_offset += word_len + 1;
-                        current_word.clear();
-                        word_scores.clear();
-                        word_start_pos = None;
-                    } else {
+                            global_offset += word_len + 1;
+                            current_word.clear();
+                            word_scores.clear();
+                            word_start_pos = None;
+                            processed = true;
+                        }
+                    }
+
+                    if !processed {
                         global_offset += 1;
                     }
                 } else {
