@@ -242,6 +242,7 @@ impl PageContent {
     /// # Returns
     ///
     /// A new `PageContent` with all fields initialized to empty/`None` values.
+    #[must_use]
     pub fn new(page_number: usize) -> Self {
         Self {
             page_number,
@@ -271,6 +272,7 @@ impl PageContent {
     /// # Returns
     ///
     /// A new `PageContent` with the image set and other fields empty.
+    #[must_use]
     pub fn with_image(page_number: usize, image: RgbImage) -> Self {
         Self {
             page_number,
@@ -300,6 +302,7 @@ impl PageContent {
     /// # Returns
     ///
     /// A new `PageContent` with the text set and other fields empty.
+    #[must_use]
     pub fn with_text(page_number: usize, text: String) -> Self {
         Self {
             page_number,

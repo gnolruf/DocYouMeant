@@ -219,9 +219,8 @@ impl RtDetr {
     ///
     /// # Returns
     ///
-    /// * `Ok(RgbImage)` - Resized image ready for inference
-    /// * `Err(InferenceError)` - If preprocessing fails
-    pub fn preprocess(&mut self, image: &RgbImage) -> Result<RgbImage, InferenceError> {
+    /// Resized image ready for inference
+    pub fn preprocess(&mut self, image: &RgbImage) -> RgbImage {
         self.src_width = image.width() as i32;
         self.src_height = image.height() as i32;
 
@@ -235,7 +234,7 @@ impl RtDetr {
         self.scale_x = self.input_size as f32 / self.src_width as f32;
         self.scale_y = self.input_size as f32 / self.src_height as f32;
 
-        Ok(resized_img)
+        resized_img
     }
 
     /// Creates the input tensors required by the RT-DETR model.
@@ -473,7 +472,7 @@ impl RtDetr {
                 message: format!("Failed to lock RtDetr instance: {e}"),
             })?;
 
-        let preprocessed = model.preprocess(image)?;
+        let preprocessed = model.preprocess(image);
         model.detect(&preprocessed)
     }
 }

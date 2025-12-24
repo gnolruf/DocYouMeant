@@ -115,6 +115,7 @@ impl AnalysisPipeline {
     ///
     /// A new `AnalysisPipeline` instance configured for the specified document type
     /// and processing mode.
+    #[must_use]
     pub fn new(document_type: DocumentType, process_id: &str, language: Option<String>) -> Self {
         Self {
             document_type,
@@ -160,7 +161,7 @@ impl AnalysisPipeline {
                         page.detected_language = Some(language);
                         page.tables = tables;
 
-                        self.update_page_text(page);
+                        Self::update_page_text(page);
 
                         let regions =
                             LayoutBox::build_regions(page.page_number, &layout_boxes, &text_lines);
@@ -179,7 +180,7 @@ impl AnalysisPipeline {
                             page.words = words;
                         }
 
-                        self.update_page_text(page);
+                        Self::update_page_text(page);
 
                         let regions =
                             LayoutBox::build_regions(page.page_number, &layout_boxes, &text_lines);
@@ -188,7 +189,7 @@ impl AnalysisPipeline {
                 }
 
                 if self.process_mode != ProcessMode::Read {
-                    let qa_results = self.answer_questions_for_page(page, questions)?;
+                    let qa_results = Self::answer_questions_for_page(page, questions);
                     page.question_answers = qa_results;
                 }
             }
@@ -207,7 +208,7 @@ impl AnalysisPipeline {
                         page.words = words;
                     }
 
-                    self.update_page_text(page);
+                    Self::update_page_text(page);
 
                     let regions =
                         LayoutBox::build_regions(page.page_number, &layout_boxes, &text_lines);
@@ -215,13 +216,13 @@ impl AnalysisPipeline {
                 }
 
                 if self.process_mode != ProcessMode::Read {
-                    let qa_results = self.answer_questions_for_page(page, questions)?;
+                    let qa_results = Self::answer_questions_for_page(page, questions);
                     page.question_answers = qa_results;
                 }
             }
             DocumentType::Text | DocumentType::Word | DocumentType::Excel | DocumentType::Csv => {
                 if self.process_mode != ProcessMode::Read {
-                    let qa_results = self.answer_questions_for_page(page, questions)?;
+                    let qa_results = Self::answer_questions_for_page(page, questions);
                     page.question_answers = qa_results;
                 }
             }
@@ -237,7 +238,7 @@ impl AnalysisPipeline {
     /// # Arguments
     ///
     /// * `page` - Mutable reference to the page content to update
-    fn update_page_text(&self, page: &mut PageContent) {
+    fn update_page_text(page: &mut PageContent) {
         let texts: Vec<String> = page
             .text_lines
             .iter()
@@ -268,29 +269,20 @@ impl AnalysisPipeline {
     /// - No questions are provided
     /// - The page has no text content
     /// - The page text is empty/whitespace only
-    ///
-    /// # Errors
-    ///
-    /// Returns `Ok` even if individual questions fail to process (failures are logged).
     fn answer_questions_for_page(
-        &self,
         page: &PageContent,
         questions: &[String],
-    ) -> Result<
-        Vec<crate::inference::tasks::question_and_answer_task::QuestionAndAnswerResult>,
-        DocumentError,
-    > {
+    ) -> Vec<crate::inference::tasks::question_and_answer_task::QuestionAndAnswerResult> {
         if questions.is_empty() {
-            return Ok(Vec::new());
+            return Vec::new();
         }
 
-        let text = match page.text.as_ref() {
-            Some(t) => t,
-            None => return Ok(Vec::new()),
+        let Some(text) = page.text.as_ref() else {
+            return Vec::new();
         };
 
         if text.trim().is_empty() {
-            return Ok(Vec::new());
+            return Vec::new();
         }
 
         let mut results = Vec::new();
@@ -309,7 +301,7 @@ impl AnalysisPipeline {
             }
         }
 
-        Ok(results)
+        results
     }
 
     /// Determines the orientation of a document image.
@@ -331,7 +323,6 @@ impl AnalysisPipeline {
     ///
     /// Returns an error if the orientation detection model fails.
     fn get_document_orientation(
-        &self,
         image: &RgbImage,
         embedded_orientation: Option<Orientation>,
     ) -> Result<Orientation, DocumentError> {
@@ -380,7 +371,7 @@ impl AnalysisPipeline {
     /// # Errors
     ///
     /// Returns an error if text detection model inference fails.
-    fn detect_text_lines(&self, image: &RgbImage) -> Result<Vec<TextBox>, DocumentError> {
+    fn detect_text_lines(image: &RgbImage) -> Result<Vec<TextBox>, DocumentError> {
         debug!("Starting text detection");
         let text_lines =
             DBNet::run(image).map_err(|source| DocumentError::ModelProcessingError { source })?;
@@ -414,7 +405,7 @@ impl AnalysisPipeline {
     /// Returns an error if:
     /// - Layout detection model inference fails
     /// - The model returns an unexpected result type
-    fn detect_layout(&self, image: &RgbImage) -> Result<Vec<LayoutBox>, DocumentError> {
+    fn detect_layout(image: &RgbImage) -> Result<Vec<LayoutBox>, DocumentError> {
         debug!("Starting layout detection");
         let result = RtDetr::run(image, RtDetrMode::Layout)
             .map_err(|source| DocumentError::ModelProcessingError { source })?;
@@ -482,7 +473,7 @@ impl AnalysisPipeline {
             table_images.push(table_image);
         }
 
-        let table_types = self.classify_table_types(&table_images)?;
+        let table_types = Self::classify_table_types(&table_images)?;
 
         let mut tables = Vec::with_capacity(table_boxes.len());
         for (i, ((table_box, table_image), table_type)) in table_boxes
@@ -493,7 +484,7 @@ impl AnalysisPipeline {
         {
             debug!("Processing table {} of type {:?}", i + 1, table_type);
 
-            match self.detect_table_cells(table_image, table_box, *table_type, page_number) {
+            match Self::detect_table_cells(table_image, table_box, *table_type, page_number) {
                 Ok(table) => {
                     debug!(
                         "Detected table with {} rows, {} columns, {} cells",
@@ -536,10 +527,7 @@ impl AnalysisPipeline {
     /// Returns an error if:
     /// - Table classification model inference fails
     /// - The model returns an unexpected result type
-    fn classify_table_types(
-        &self,
-        table_images: &[RgbImage],
-    ) -> Result<Vec<TableType>, DocumentError> {
+    fn classify_table_types(table_images: &[RgbImage]) -> Result<Vec<TableType>, DocumentError> {
         if table_images.is_empty() {
             return Ok(Vec::new());
         }
@@ -574,7 +562,6 @@ impl AnalysisPipeline {
     /// - Cell detection model inference fails
     /// - The model returns an unexpected result type
     fn detect_table_cells(
-        &self,
         table_image: &RgbImage,
         table_box: &LayoutBox,
         table_type: TableType,
@@ -642,7 +629,7 @@ impl AnalysisPipeline {
         image: &RgbImage,
         page: &PageContent,
     ) -> Result<PdfProcessingResult, DocumentError> {
-        let document_orientation = self.get_document_orientation(image, page.orientation)?;
+        let document_orientation = Self::get_document_orientation(image, page.orientation)?;
         debug!("Document orientation: {:?}", document_orientation);
 
         let oriented_image = if document_orientation != Orientation::Oriented0 {
@@ -651,10 +638,10 @@ impl AnalysisPipeline {
             image.clone()
         };
 
-        let mut text_lines = self.detect_text_lines(&oriented_image)?;
+        let mut text_lines = Self::detect_text_lines(&oriented_image)?;
         debug!("Found {} text lines", text_lines.len());
 
-        self.match_embedded_text_to_lines(&mut text_lines, &page.words);
+        Self::match_embedded_text_to_lines(&mut text_lines, &page.words);
         debug!("Matched embedded text to lines");
 
         let cached_language = self.language.borrow().clone();
@@ -681,7 +668,7 @@ impl AnalysisPipeline {
         let (layout_boxes, mut tables) = if self.process_mode == ProcessMode::Read {
             (Vec::new(), Vec::new())
         } else {
-            let layout = self.detect_layout(&oriented_image)?;
+            let layout = Self::detect_layout(&oriented_image)?;
             let tables = self.detect_tables(&oriented_image, &layout, page.page_number)?;
             (layout, tables)
         };
@@ -717,7 +704,7 @@ impl AnalysisPipeline {
     /// - `text_score`: Average confidence of matched words
     /// - `span`: Document span for the text content
     /// - `angle`: Set to `Oriented0` if not already set
-    fn match_embedded_text_to_lines(&self, text_lines: &mut [TextBox], embedded_words: &[TextBox]) {
+    fn match_embedded_text_to_lines(text_lines: &mut [TextBox], embedded_words: &[TextBox]) {
         let mut current_offset = 0;
         for text_line in text_lines.iter_mut() {
             let mut matched_texts = Vec::new();
@@ -788,7 +775,7 @@ impl AnalysisPipeline {
         image: &RgbImage,
         page_number: usize,
     ) -> Result<ImageProcessingResult, DocumentError> {
-        let document_orientation = self.get_document_orientation(image, None)?;
+        let document_orientation = Self::get_document_orientation(image, None)?;
         debug!("Document orientation: {:?}", document_orientation);
 
         let oriented_image = if document_orientation != Orientation::Oriented0 {
@@ -797,7 +784,7 @@ impl AnalysisPipeline {
             image.clone()
         };
 
-        let mut text_lines = self.detect_text_lines(&oriented_image)?;
+        let mut text_lines = Self::detect_text_lines(&oriented_image)?;
         debug!("Found {} text lines", text_lines.len());
 
         let image_parts =
@@ -861,7 +848,7 @@ impl AnalysisPipeline {
         let (layout_boxes, mut tables) = if self.process_mode == ProcessMode::Read {
             (Vec::new(), Vec::new())
         } else {
-            let layout = self.detect_layout(&oriented_image)?;
+            let layout = Self::detect_layout(&oriented_image)?;
             let tables = self.detect_tables(&oriented_image, &layout, page_number)?;
             (layout, tables)
         };

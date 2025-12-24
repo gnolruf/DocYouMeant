@@ -139,6 +139,7 @@ impl LayoutBox {
     /// * `bounds` - The quadrilateral bounding coordinates of the layout region.
     /// * `class` - The classification type of this layout element.
     /// * `confidence` - Model confidence score (typically 0.0 to 1.0).
+    #[must_use]
     pub fn new(bounds: Bounds, class: LayoutClass, confidence: f32) -> Self {
         Self {
             bounds,

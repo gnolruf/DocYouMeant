@@ -92,6 +92,7 @@ impl AnalysisResult {
     /// - Empty `content` string
     /// - Empty collections for `pages`, `regions`, `tables`, and `question_answers`
     /// - `metadata` set to `None`
+    #[must_use]
     pub fn new(process_id: &str, content_format: &str) -> Self {
         Self {
             api_version: env!("CARGO_PKG_VERSION").to_string(),

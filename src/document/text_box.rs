@@ -39,6 +39,7 @@ impl DocumentSpan {
     /// # Returns
     ///
     /// A new `DocumentSpan` instance.
+    #[must_use]
     pub fn new(offset: usize, length: usize) -> Self {
         Self { offset, length }
     }

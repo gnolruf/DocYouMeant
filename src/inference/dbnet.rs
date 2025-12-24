@@ -149,9 +149,8 @@ impl DBNet {
     ///
     /// # Returns
     ///
-    /// * `Ok(RgbImage)` - Preprocessed image ready for inference
-    /// * `Err(InferenceError)` - If preprocessing fails
-    pub fn preprocess(&mut self, image: &RgbImage) -> Result<RgbImage, InferenceError> {
+    /// Preprocessed image ready for inference
+    pub fn preprocess(&mut self, image: &RgbImage) -> RgbImage {
         let width = image.width() as i32;
         let height = image.height() as i32;
         let orig_max_side = width.max(height);
@@ -201,7 +200,7 @@ impl DBNet {
             pad_right as i32,
         ];
 
-        Ok(padded_final_img)
+        padded_final_img
     }
 
     /// Performs text detection on a preprocessed image.
@@ -368,10 +367,7 @@ impl DBNet {
                 continue;
             }
 
-            let box_score = match Self::box_score(&min_boxes, pred_array) {
-                Ok(score) => score,
-                Err(_) => continue,
-            };
+            let box_score = Self::box_score(&min_boxes, pred_array);
 
             if box_score < self.box_score_thresh {
                 continue;
@@ -525,19 +521,14 @@ impl DBNet {
     ///
     /// # Returns
     ///
-    /// * `Ok(f32)` - Average prediction value within the box (0.0 to 1.0 for probability maps)
-    /// * `Err` - If an error occurs during processing
-    ///
+    /// Average prediction value within the box (0.0 to 1.0 for probability maps).
     /// Returns 0.0 if the prediction array is empty or no pixels fall within the box.
-    pub fn box_score(
-        boxes: &[Coord<i32>; 4],
-        pred: &Array2<f32>,
-    ) -> Result<f32, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn box_score(boxes: &[Coord<i32>; 4], pred: &Array2<f32>) -> f32 {
         let width = pred.ncols();
         let height = pred.nrows();
 
         if width == 0 || height == 0 {
-            return Ok(0.0);
+            return 0.0;
         }
 
         let mut min_x = boxes[0].x;
@@ -585,9 +576,9 @@ impl DBNet {
         }
 
         if count > 0 {
-            Ok(sum / count as f32)
+            sum / count as f32
         } else {
-            Ok(0.0)
+            0.0
         }
     }
 
@@ -613,7 +604,7 @@ impl DBNet {
                 message: format!("Failed to lock DBNet instance: {e}"),
             })?;
 
-        let preprocessed = model.preprocess(image)?;
+        let preprocessed = model.preprocess(image);
         model.detect(&preprocessed)
     }
 }

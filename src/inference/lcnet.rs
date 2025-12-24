@@ -249,6 +249,55 @@ impl LCNet {
         Ok(())
     }
 
+    /// Runs inference on a preprocessed image and returns the output logits.
+    ///
+    /// This is a common helper that handles tensor creation, session execution,
+    /// and output extraction for all classification modes.
+    ///
+    /// # Arguments
+    ///
+    /// * `src` - Preprocessed RGB image (already resized)
+    /// * `operation_name` - Name of the operation for error messages
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<f32>)` - Output logits from the model
+    /// * `Err(InferenceError)` - If inference fails
+    fn run_inference(&mut self, src: &RgbImage) -> Result<Vec<f32>, InferenceError> {
+        let input_array =
+            image_utils::subtract_mean_normalize(src, &self.mean_values, &self.norm_values);
+
+        let shape = input_array.shape().to_vec();
+        let (data, _offset) = input_array.into_raw_vec_and_offset();
+        let input_value = Value::from_array((shape.as_slice(), data)).map_err(|e| {
+            InferenceError::PreprocessingError {
+                operation: "create input value".to_string(),
+                message: e.to_string(),
+            }
+        })?;
+
+        let outputs = self.session.run(inputs!["x" => input_value]).map_err(|e| {
+            InferenceError::ModelExecutionError {
+                operation: "LCNet forward pass".to_string(),
+                source: e,
+            }
+        })?;
+
+        let output = outputs
+            .get("fetch_name_0")
+            .ok_or_else(|| InferenceError::PredictionError {
+                operation: "get model outputs".to_string(),
+                message: "Output 'fetch_name_0' not found".to_string(),
+            })?
+            .try_extract_tensor::<f32>()
+            .map_err(|source| InferenceError::PredictionError {
+                operation: "extract output tensor".to_string(),
+                message: source.to_string(),
+            })?;
+
+        Ok(output.1.to_vec())
+    }
+
     /// Infers the orientation of a single image.
     ///
     /// Runs the classification model on a preprocessed image and interprets
@@ -268,38 +317,7 @@ impl LCNet {
         src: &RgbImage,
         is_vertical: bool,
     ) -> Result<Orientation, InferenceError> {
-        let input_array =
-            image_utils::subtract_mean_normalize(src, &self.mean_values, &self.norm_values);
-
-        let shape = input_array.shape().to_vec();
-        let (data, _offset) = input_array.into_raw_vec_and_offset();
-        let input_value = Value::from_array((shape.as_slice(), data)).map_err(|e| {
-            InferenceError::PreprocessingError {
-                operation: "create input value".to_string(),
-                message: e.to_string(),
-            }
-        })?;
-
-        let outputs = self.session.run(inputs!["x" => input_value]).map_err(|e| {
-            InferenceError::ModelExecutionError {
-                operation: "AngleNet forward pass".to_string(),
-                source: e,
-            }
-        })?;
-
-        let output = outputs
-            .get("fetch_name_0")
-            .ok_or_else(|| InferenceError::PredictionError {
-                operation: "get model outputs".to_string(),
-                message: "Output 'fetch_name_0' not found".to_string(),
-            })?
-            .try_extract_tensor::<f32>()
-            .map_err(|source| InferenceError::PredictionError {
-                operation: "extract output tensor".to_string(),
-                message: source.to_string(),
-            })?;
-
-        let output_data = output.1;
+        let output_data = self.run_inference(src)?;
 
         match self.mode {
             LCNetMode::TextOrientation => {
@@ -367,38 +385,7 @@ impl LCNet {
     /// * `Ok(TableType)` - Either `Wired` (with borders) or `Wireless` (borderless)
     /// * `Err(InferenceError)` - If inference fails
     fn infer_table_type(&mut self, src: &RgbImage) -> Result<TableType, InferenceError> {
-        let input_array =
-            image_utils::subtract_mean_normalize(src, &self.mean_values, &self.norm_values);
-
-        let shape = input_array.shape().to_vec();
-        let (data, _offset) = input_array.into_raw_vec_and_offset();
-        let input_value = Value::from_array((shape.as_slice(), data)).map_err(|e| {
-            InferenceError::PreprocessingError {
-                operation: "create input value".to_string(),
-                message: e.to_string(),
-            }
-        })?;
-
-        let outputs = self.session.run(inputs!["x" => input_value]).map_err(|e| {
-            InferenceError::ModelExecutionError {
-                operation: "TableClassification forward pass".to_string(),
-                source: e,
-            }
-        })?;
-
-        let output = outputs
-            .get("fetch_name_0")
-            .ok_or_else(|| InferenceError::PredictionError {
-                operation: "get model outputs".to_string(),
-                message: "Output 'fetch_name_0' not found".to_string(),
-            })?
-            .try_extract_tensor::<f32>()
-            .map_err(|source| InferenceError::PredictionError {
-                operation: "extract output tensor".to_string(),
-                message: source.to_string(),
-            })?;
-
-        let output_data = output.1;
+        let output_data = self.run_inference(src)?;
 
         // Table classification: 2-class output (wired vs wireless)
         let score_wired = output_data[0];
