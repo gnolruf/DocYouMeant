@@ -21,6 +21,7 @@ use std::sync::Mutex;
 use crate::document::bounds::Bounds;
 use crate::document::TextBox;
 use crate::inference::error::InferenceError;
+use crate::utils::config::AppConfig;
 use crate::utils::{box_utils, image_utils};
 
 static DBNET_INSTANCE: OnceCell<Mutex<DBNet>> = OnceCell::new();
@@ -64,7 +65,7 @@ pub struct DBNet {
 
 impl DBNet {
     /// Path to the DBNet ONNX model file.
-    const MODEL_PATH: &'static str = "models/onnx/text_detection.onnx";
+    const MODEL_PATH: &'static str = "onnx/text_detection.onnx";
     /// Number of threads for ONNX Runtime inter-op parallelism.
     const NUM_THREADS: usize = 4;
 
@@ -85,15 +86,18 @@ impl DBNet {
     /// - `box_score_thresh`: 0.5 (minimum confidence)
     /// - `unclip_ratio`: 1.5 (box expansion factor)
     pub fn new() -> Result<Self, InferenceError> {
+        let config = AppConfig::get();
+        let model_path = config.model_path(Self::MODEL_PATH);
+
         let session = Session::builder()
             .map_err(|source| InferenceError::ModelFileLoadError {
-                path: Self::MODEL_PATH.into(),
+                path: model_path.clone().into(),
                 source,
             })?
             .with_inter_threads(Self::NUM_THREADS)?
-            .commit_from_file(Self::MODEL_PATH)
+            .commit_from_file(&model_path)
             .map_err(|source| InferenceError::ModelFileLoadError {
-                path: Self::MODEL_PATH.into(),
+                path: model_path.into(),
                 source,
             })?;
 

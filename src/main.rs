@@ -1,5 +1,6 @@
 use clap::Parser;
 use docyoumeant::server;
+use docyoumeant::utils::config::AppConfig;
 use std::env;
 
 #[derive(Parser, Debug)]
@@ -13,6 +14,8 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+
+    let _config = AppConfig::init()?;
 
     setup_ort()?;
 
@@ -42,7 +45,8 @@ fn setup_ort() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn run_server(language: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
-    let addr = std::env::var("DOCYOUMEANT_ADDR").unwrap_or_else(|_| "127.0.0.1:3000".to_string());
+    let config = AppConfig::get();
+    let addr = &config.host_url;
 
     let socket_addr: std::net::SocketAddr = addr.parse()?;
 

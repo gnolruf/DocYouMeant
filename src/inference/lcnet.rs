@@ -17,6 +17,7 @@ use tracing::{error, warn};
 use crate::document::table::TableType;
 use crate::document::text_box::Orientation;
 use crate::inference::error::InferenceError;
+use crate::utils::config::AppConfig;
 use crate::utils::image_utils;
 
 static TEXT_ORIENTATION_INSTANCE: OnceCell<Mutex<LCNet>> = OnceCell::new();
@@ -78,13 +79,12 @@ pub struct LCNet {
 
 impl LCNet {
     /// Path to the text orientation classification model.
-    const TEXT_ORIENTATION_MODEL_PATH: &'static str =
-        "models/onnx/text_orientation_classification.onnx";
+    const TEXT_ORIENTATION_MODEL_PATH: &'static str = "onnx/text_orientation_classification.onnx";
     /// Path to the document orientation classification model.
     const DOCUMENT_ORIENTATION_MODEL_PATH: &'static str =
-        "models/onnx/document_orientation_classification.onnx";
+        "onnx/document_orientation_classification.onnx";
     /// Path to the table type classification model.
-    const TABLE_CLASSIFICATION_MODEL_PATH: &'static str = "models/onnx/table_classification.onnx";
+    const TABLE_CLASSIFICATION_MODEL_PATH: &'static str = "onnx/table_classification.onnx";
     /// Number of threads for ONNX Runtime inter-op parallelism.
     const NUM_THREADS: usize = 4;
 
@@ -103,22 +103,24 @@ impl LCNet {
     /// * `Ok(LCNet)` - Initialized classifier ready for inference
     /// * `Err(InferenceError)` - If the model file cannot be loaded
     pub fn new(mode: LCNetMode) -> Result<Self, InferenceError> {
-        let model_path = match mode {
+        let config = AppConfig::get();
+        let relative_path = match mode {
             LCNetMode::TextOrientation => Self::TEXT_ORIENTATION_MODEL_PATH,
             LCNetMode::DocumentOrientation => Self::DOCUMENT_ORIENTATION_MODEL_PATH,
             LCNetMode::TableType => Self::TABLE_CLASSIFICATION_MODEL_PATH,
         };
+        let model_path = config.model_path(relative_path);
 
         let session = Session::builder()
             .map_err(|source| InferenceError::ModelFileLoadError {
-                path: model_path.into(),
+                path: model_path.clone().into(),
                 source,
             })?
             .with_execution_providers([
                 ort::execution_providers::TensorRTExecutionProvider::default()
                     .with_device_id(0)
                     .with_engine_cache(true)
-                    .with_engine_cache_path("/workspaces/DocYouMeant/models/trt_engines")
+                    .with_engine_cache_path(&config.rt_cache_directory)
                     .with_engine_cache_prefix("docyoumeant_")
                     .with_max_workspace_size(5 << 30)
                     .with_fp16(true)
@@ -126,7 +128,7 @@ impl LCNet {
                     .build(),
             ])?
             .with_inter_threads(Self::NUM_THREADS)?
-            .commit_from_file(model_path)
+            .commit_from_file(&model_path)
             .map_err(|source| InferenceError::ModelFileLoadError {
                 path: model_path.into(),
                 source,

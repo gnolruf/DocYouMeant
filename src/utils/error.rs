@@ -14,3 +14,12 @@ pub enum BoxError {
     #[error("Polygon offset operation failed")]
     OffsetFailed,
 }
+
+#[derive(Error, Debug)]
+pub enum ConfigError {
+    #[error("Failed to read configuration file: {0}")]
+    IoError(#[from] std::io::Error),
+
+    #[error("Failed to parse configuration JSON: {0}")]
+    ParseError(#[from] serde_json::Error),
+}
