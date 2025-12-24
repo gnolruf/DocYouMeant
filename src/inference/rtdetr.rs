@@ -19,6 +19,7 @@ use crate::document::bounds::Bounds;
 use crate::document::table::TableCell;
 use crate::document::{LayoutBox, LayoutClass};
 use crate::inference::error::InferenceError;
+use crate::utils::config::AppConfig;
 use crate::utils::{box_utils, image_utils};
 
 /// Singleton instance for layout detection model.
@@ -86,13 +87,13 @@ pub struct RtDetr {
 
 impl RtDetr {
     /// Path to the layout detection model.
-    const LAYOUT_DETECTION_MODEL_PATH: &'static str = "models/onnx/layout_detection.onnx";
+    const LAYOUT_DETECTION_MODEL_PATH: &'static str = "onnx/layout_detection.onnx";
     /// Path to the wired table cell detection model.
     const WIRED_TABLE_CELL_DETECTION_MODEL_PATH: &'static str =
-        "models/onnx/wired_table_cell_detection.onnx";
+        "onnx/wired_table_cell_detection.onnx";
     /// Path to the wireless table cell detection model.
     const WIRELESS_TABLE_CELL_DETECTION_MODEL_PATH: &'static str =
-        "models/onnx/wireless_table_cell_detection.onnx";
+        "onnx/wireless_table_cell_detection.onnx";
     /// Number of threads for ONNX Runtime inter-op parallelism.
     const NUM_THREADS: usize = 4;
 
@@ -110,22 +111,24 @@ impl RtDetr {
     /// * `Ok(RtDetr)` - Initialized detector ready for inference
     /// * `Err(InferenceError)` - If the model file cannot be loaded
     pub fn new(mode: RtDetrMode) -> Result<Self, InferenceError> {
-        let model_path = match mode {
+        let config = AppConfig::get();
+        let relative_path = match mode {
             RtDetrMode::Layout => Self::LAYOUT_DETECTION_MODEL_PATH,
             RtDetrMode::WiredTableCell => Self::WIRED_TABLE_CELL_DETECTION_MODEL_PATH,
             RtDetrMode::WirelessTableCell => Self::WIRELESS_TABLE_CELL_DETECTION_MODEL_PATH,
         };
+        let model_path = config.model_path(relative_path);
 
         let session = Session::builder()
             .map_err(|source| InferenceError::ModelFileLoadError {
-                path: model_path.into(),
+                path: model_path.clone().into(),
                 source,
             })?
             .with_execution_providers([
                 ort::execution_providers::TensorRTExecutionProvider::default()
                     .with_device_id(0)
                     .with_engine_cache(true)
-                    .with_engine_cache_path("/workspaces/DocYouMeant/models/trt_engines")
+                    .with_engine_cache_path(&config.rt_cache_directory)
                     .with_engine_cache_prefix("docyoumeant_")
                     .with_max_workspace_size(5 << 30)
                     .with_fp16(true)
@@ -133,7 +136,7 @@ impl RtDetr {
                     .build(),
             ])?
             .with_inter_threads(Self::NUM_THREADS)?
-            .commit_from_file(model_path)
+            .commit_from_file(&model_path)
             .map_err(|source| InferenceError::ModelFileLoadError {
                 path: model_path.into(),
                 source,

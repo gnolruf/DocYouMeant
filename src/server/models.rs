@@ -9,18 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use super::error::ValidationError;
 use crate::document::AnalysisResult;
-
-/// Maximum allowed file size in bytes (1 GB).
-///
-/// This limit prevents memory exhaustion from excessively large uploads.
-const MAX_FILE_SIZE_BYTES: usize = 1024 * 1024 * 1024;
-
-/// Maximum allowed length of Base64-encoded data.
-///
-/// Base64 encoding expands data by approximately 4/3, so this value is
-/// calculated from [`MAX_FILE_SIZE_BYTES`] to ensure the decoded data
-/// fits within the file size limit.
-const MAX_BASE64_LENGTH: usize = (MAX_FILE_SIZE_BYTES / 3 + 1) * 4;
+use crate::utils::config::AppConfig;
 
 /// Characters that are forbidden in filenames.
 ///
@@ -104,9 +93,13 @@ impl AnalysisRequest {
     ///
     /// Returns [`ValidationError::Base64DataTooLarge`] if the encoded data exceeds the limit.
     /// Returns [`ValidationError::InvalidBase64`] if the data is not valid Base64.
-    /// Returns [`ValidationError::FileSizeTooLarge`] if the decoded data exceeds 1 GB.
+    /// Returns [`ValidationError::FileSizeTooLarge`] if the decoded data exceeds the configured limit.
     fn validate_and_decode_base64(&self) -> Result<Vec<u8>, ValidationError> {
-        if self.data.len() > MAX_BASE64_LENGTH {
+        let config = AppConfig::get();
+        let max_file_size = config.max_file_size as usize;
+        let max_base64_length = (max_file_size / 3 + 1) * 4;
+
+        if self.data.len() > max_base64_length {
             return Err(ValidationError::Base64DataTooLarge);
         }
 
@@ -114,7 +107,7 @@ impl AnalysisRequest {
             .decode(&self.data)
             .map_err(|e| ValidationError::InvalidBase64(e.to_string()))?;
 
-        if decoded.len() > MAX_FILE_SIZE_BYTES {
+        if decoded.len() > max_file_size {
             return Err(ValidationError::FileSizeTooLarge);
         }
 

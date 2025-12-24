@@ -5,6 +5,9 @@ mod analysis_tests;
 mod box_utils_tests;
 
 #[cfg(test)]
+mod config_tests;
+
+#[cfg(test)]
 mod content_tests;
 
 #[cfg(test)]

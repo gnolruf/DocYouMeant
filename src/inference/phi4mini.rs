@@ -19,6 +19,7 @@ use std::sync::Mutex;
 use tokenizers::Tokenizer;
 
 use crate::inference::error::InferenceError;
+use crate::utils::config::AppConfig;
 
 /// Maximum number of tokens to generate in a single response.
 const MAX_LENGTH: usize = 4096;
@@ -100,8 +101,9 @@ impl Phi4MiniInference {
                 source,
             })?;
 
-        let tokenizer_path = Path::new("models/tokenizer/phi-4-mini-instruct/tokenizer.json");
-        let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| {
+        let config = AppConfig::get();
+        let tokenizer_path = config.model_path("tokenizer/phi-4-mini-instruct/tokenizer.json");
+        let tokenizer = Tokenizer::from_file(&tokenizer_path).map_err(|e| {
             InferenceError::PreprocessingError {
                 operation: "load tokenizer for EOS token".to_string(),
                 message: format!("Failed to load tokenizer: {e}"),
@@ -156,7 +158,9 @@ impl Phi4MiniInference {
     /// * `Err(InferenceError)` - If initialization fails
     pub fn get_or_init() -> Result<(), InferenceError> {
         PHI4MINI_INSTANCE.get_or_try_init(|| {
-            let model_dir = Path::new("models/onnx");
+            let config = AppConfig::get();
+            let model_path = config.model_path("onnx");
+            let model_dir = Path::new(&model_path);
             Self::new(model_dir).map(Mutex::new)
         })?;
         Self::get_tokenizer()?;
@@ -174,8 +178,9 @@ impl Phi4MiniInference {
     /// * `Err(InferenceError)` - If the tokenizer file cannot be loaded
     pub fn get_tokenizer() -> Result<&'static Tokenizer, InferenceError> {
         TOKENIZER_INSTANCE.get_or_try_init(|| {
-            let tokenizer_path = "models/tokenizer/phi-4-mini-instruct/tokenizer.json";
-            Tokenizer::from_file(tokenizer_path).map_err(|e| InferenceError::PreprocessingError {
+            let config = AppConfig::get();
+            let tokenizer_path = config.model_path("tokenizer/phi-4-mini-instruct/tokenizer.json");
+            Tokenizer::from_file(&tokenizer_path).map_err(|e| InferenceError::PreprocessingError {
                 operation: "load tokenizer".to_string(),
                 message: format!("Failed to load tokenizer: {e}"),
             })
@@ -204,7 +209,9 @@ impl Phi4MiniInference {
         F: FnOnce(&mut Phi4MiniInference) -> Result<R, InferenceError>,
     {
         let instance = PHI4MINI_INSTANCE.get_or_try_init(|| {
-            let model_dir = Path::new("models/onnx");
+            let config = AppConfig::get();
+            let model_path = config.model_path("onnx");
+            let model_dir = Path::new(&model_path);
             Self::new(model_dir).map(Mutex::new)
         })?;
 

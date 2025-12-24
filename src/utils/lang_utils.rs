@@ -6,12 +6,14 @@ use std::fs;
 use lingua::{Language, LanguageDetector, LanguageDetectorBuilder};
 use serde::{Deserialize, Serialize};
 
+use super::config::AppConfig;
+
 /// Configuration for a language's OCR model and dictionary.
 ///
 /// This struct holds the necessary file paths and metadata for loading
 /// language-specific OCR recognition models.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LanguageConfig {
+pub struct LanguageModelInfo {
     /// The human-readable name of the language (e.g., "english", "chinese").
     pub name: String,
     /// Path to the ONNX model file for text recognition.
@@ -45,15 +47,16 @@ impl LangUtils {
     ///
     /// * `Some(LanguageConfig)` - The configuration for the requested language if found.
     /// * `None` - If the language is not supported or not found in the configuration.
-    pub fn get_language_config(language: &str) -> Option<LanguageConfig> {
+    pub fn get_language_config(language: &str) -> Option<LanguageModelInfo> {
+        let config = AppConfig::get();
         match Self::get_all_language_configs(false) {
             Ok(configs) => configs.get(language).cloned(),
             Err(_) => {
                 if language == "english" {
-                    Some(LanguageConfig {
+                    Some(LanguageModelInfo {
                         name: "english".to_string(),
-                        model_file: "models/onnx/text_recognition_en.onnx".to_string(),
-                        dict_file: "models/dict/en_dict.txt".to_string(),
+                        model_file: config.model_path("onnx/text_recognition_en.onnx"),
+                        dict_file: config.model_path("dict/en_dict.txt"),
                         is_script_model: false,
                     })
                 } else {
@@ -85,10 +88,11 @@ impl LangUtils {
     /// - The JSON content cannot be deserialized into the expected format.
     pub fn get_all_language_configs(
         script_models_only: bool,
-    ) -> Result<HashMap<String, LanguageConfig>, Box<dyn std::error::Error>> {
-        let config_path = "models/ocr_lang_models.json";
+    ) -> Result<HashMap<String, LanguageModelInfo>, Box<dyn std::error::Error>> {
+        let config = AppConfig::get();
+        let config_path = config.model_path("ocr_lang_models.json");
         let config_content = fs::read_to_string(config_path)?;
-        let configs: HashMap<String, LanguageConfig> = serde_json::from_str(&config_content)?;
+        let configs: HashMap<String, LanguageModelInfo> = serde_json::from_str(&config_content)?;
 
         if script_models_only {
             Ok(configs
