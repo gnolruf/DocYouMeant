@@ -11,6 +11,7 @@
 use std::collections::HashMap;
 
 use image::RgbImage;
+use lingua::Language;
 use rand::rng;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
@@ -29,6 +30,9 @@ const MAX_SAMPLE_LINES: usize = 3;
 /// OCR model was used and the confidence level of the detection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguageDetectionResult {
+    /// The detected language as a Lingua `Language` enum.
+    #[serde(skip)]
+    pub language_enum: Option<Language>,
     /// The detected language name (e.g., "english", "chinese", "arabic").
     ///
     /// This corresponds to language identifiers used by [`LangUtils`].
@@ -46,7 +50,28 @@ pub struct LanguageDetectionResult {
 }
 
 impl LanguageDetectionResult {
-    /// Creates a new `LanguageDetectionResult`.
+    /// Creates a new `LanguageDetectionResult` from a Language enum.
+    ///
+    /// # Arguments
+    ///
+    /// * `language` - The detected language as a Lingua `Language` enum.
+    /// * `model_file` - The OCR model filename used for detection.
+    /// * `confidence` - The confidence score (0.0 to 1.0).
+    ///
+    /// # Returns
+    ///
+    /// A new `LanguageDetectionResult` instance.
+    #[must_use]
+    pub fn from_language(language: Language, model_file: String, confidence: f32) -> Self {
+        Self {
+            language_enum: Some(language),
+            language: LangUtils::map_from_lingua_language(language),
+            model_file,
+            confidence,
+        }
+    }
+
+    /// Creates a new `LanguageDetectionResult` from a language string.
     ///
     /// # Arguments
     ///
@@ -59,11 +84,21 @@ impl LanguageDetectionResult {
     /// A new `LanguageDetectionResult` instance.
     #[must_use]
     pub fn new(language: String, model_file: String, confidence: f32) -> Self {
+        let language_enum = LangUtils::parse_language(&language);
         Self {
+            language_enum,
             language,
             model_file,
             confidence,
         }
+    }
+
+    /// Gets the detected language as a Lingua `Language` enum.
+    ///
+    /// Falls back to `Language::English` if the language couldn't be parsed.
+    #[must_use]
+    pub fn get_language(&self) -> Language {
+        self.language_enum.unwrap_or(Language::English)
     }
 }
 
@@ -191,19 +226,29 @@ impl LanguageDetectionTask {
         language: &str,
         samples: &[(&TextBox, &RgbImage)],
     ) -> Result<(f32, Vec<String>), InferenceError> {
-        let mut crnn = Crnn::new(language)?;
+        let lang_enum = LangUtils::parse_language(language).ok_or_else(|| {
+            InferenceError::PreprocessingError {
+                operation: "parse language".to_string(),
+                message: format!("Unknown language: {language}"),
+            }
+        })?;
+
+        let images: Vec<&RgbImage> = samples.iter().map(|(_, img)| *img).collect();
+        let mut text_boxes: Vec<TextBox> = samples.iter().map(|(tb, _)| (*tb).clone()).collect();
+
+        Crnn::with_instance(lang_enum, |crnn| {
+            let images_owned: Vec<RgbImage> = images.iter().map(|img| (*img).clone()).collect();
+            crnn.get_texts(&images_owned, &mut text_boxes)
+        })?;
 
         let mut total_score = 0.0;
         let mut recognized_texts = Vec::new();
 
-        for (text_box, image) in samples {
-            let mut text_box_clone = (*text_box).clone();
-            let _ = crnn.get_text(image, &mut text_box_clone)?;
-
-            if let Some(text) = &text_box_clone.text {
+        for text_box in &text_boxes {
+            if let Some(text) = &text_box.text {
                 recognized_texts.push(text.clone());
             }
-            total_score += text_box_clone.text_score;
+            total_score += text_box.text_score;
         }
 
         let avg_score = if samples.is_empty() {

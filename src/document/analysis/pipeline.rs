@@ -4,6 +4,7 @@
 //! including text detection, layout analysis, table extraction, and question answering.
 
 use image::RgbImage;
+use lingua::Language;
 use tracing::{debug, info, instrument, warn};
 
 use crate::document::content::{DocumentContent, DocumentType, PageContent};
@@ -20,6 +21,7 @@ use crate::inference::{
     lcnet::{LCNet, LCNetMode, LCNetResult},
     rtdetr::{RtDetr, RtDetrMode, RtDetrResult},
 };
+use crate::utils::lang_utils::LangUtils;
 use crate::utils::{box_utils, image_utils};
 
 /// Result type for image document processing.
@@ -30,14 +32,14 @@ use crate::utils::{box_utils, image_utils};
 /// - Layout boxes identifying document regions
 /// - Tables detected and parsed from the document
 /// - Document orientation
-/// - Detected language code
+/// - Detected language
 type ImageProcessingResult = (
     Vec<TextBox>,
     Vec<TextBox>,
     Vec<LayoutBox>,
     Vec<Table>,
     Orientation,
-    String,
+    Language,
 );
 
 /// Result type for PDF document processing with embedded text.
@@ -47,13 +49,13 @@ type ImageProcessingResult = (
 /// - Layout boxes identifying document regions
 /// - Tables detected and parsed from the document
 /// - Document orientation
-/// - Detected language code
+/// - Detected language
 type PdfProcessingResult = (
     Vec<TextBox>,
     Vec<LayoutBox>,
     Vec<Table>,
     Orientation,
-    String,
+    Language,
 );
 
 /// Processing mode that determines the depth of document analysis.
@@ -140,7 +142,7 @@ impl AnalysisPipeline {
         &self,
         page: &mut PageContent,
         questions: &[String],
-        language_cache: &mut Option<String>,
+        language_cache: &mut Option<Language>,
     ) -> Result<(), DocumentError> {
         debug!(
             "Processing page {} with mode {:?}",
@@ -157,7 +159,8 @@ impl AnalysisPipeline {
                         page.orientation = Some(orientation);
                         page.layout_boxes.clone_from(&layout_boxes);
                         page.text_lines.clone_from(&text_lines);
-                        page.detected_language = Some(language);
+                        page.detected_language =
+                            Some(LangUtils::map_from_lingua_language(language));
                         page.tables = tables;
 
                         Self::update_page_text(page);
@@ -173,7 +176,8 @@ impl AnalysisPipeline {
                         page.orientation = Some(orientation);
                         page.layout_boxes.clone_from(&layout_boxes);
                         page.text_lines.clone_from(&text_lines);
-                        page.detected_language = Some(language);
+                        page.detected_language =
+                            Some(LangUtils::map_from_lingua_language(language));
                         page.tables = tables;
                         if !words.is_empty() {
                             page.words = words;
@@ -201,7 +205,7 @@ impl AnalysisPipeline {
                     page.orientation = Some(orientation);
                     page.layout_boxes.clone_from(&layout_boxes);
                     page.text_lines.clone_from(&text_lines);
-                    page.detected_language = Some(language);
+                    page.detected_language = Some(LangUtils::map_from_lingua_language(language));
                     page.tables = tables;
                     if !words.is_empty() {
                         page.words = words;
@@ -617,7 +621,7 @@ impl AnalysisPipeline {
     /// - Layout boxes (empty in Read mode)
     /// - Detected tables with cell content (empty in Read mode)
     /// - Document orientation
-    /// - Detected language code
+    /// - Detected language
     ///
     /// # Errors
     ///
@@ -627,7 +631,7 @@ impl AnalysisPipeline {
         &self,
         image: &RgbImage,
         page: &PageContent,
-        language_cache: &mut Option<String>,
+        language_cache: &mut Option<Language>,
     ) -> Result<PdfProcessingResult, DocumentError> {
         let document_orientation = Self::get_document_orientation(image, page.orientation)?;
         debug!("Document orientation: {:?}", document_orientation);
@@ -646,8 +650,9 @@ impl AnalysisPipeline {
 
         let language = match language_cache {
             Some(lang) => {
-                debug!("Using provided/cached language: {}", lang);
-                lang.clone()
+                let lang_str = LangUtils::map_from_lingua_language(*lang);
+                debug!("Using provided/cached language: {}", lang_str);
+                *lang
             }
             None => {
                 debug!("No language provided, running language detection on embedded text");
@@ -659,8 +664,9 @@ impl AnalysisPipeline {
                     "Detected language from embedded text: {}",
                     detection_result.language
                 );
-                *language_cache = Some(detection_result.language.clone());
-                detection_result.language
+                let detected_lang = detection_result.get_language();
+                *language_cache = Some(detected_lang);
+                detected_lang
             }
         };
 
@@ -760,7 +766,7 @@ impl AnalysisPipeline {
     /// - Layout boxes (empty in Read mode)
     /// - Detected tables with cell content (empty in Read mode)
     /// - Document orientation
-    /// - Detected language code
+    /// - Detected language
     ///
     /// # Errors
     ///
@@ -773,7 +779,7 @@ impl AnalysisPipeline {
         &self,
         image: &RgbImage,
         page_number: usize,
-        language_cache: &mut Option<String>,
+        language_cache: &mut Option<Language>,
     ) -> Result<ImageProcessingResult, DocumentError> {
         let document_orientation = Self::get_document_orientation(image, None)?;
         debug!("Document orientation: {:?}", document_orientation);
@@ -819,8 +825,9 @@ impl AnalysisPipeline {
 
         let language = match language_cache {
             Some(lang) => {
-                debug!("Using provided language: {}", lang);
-                lang.clone()
+                let lang_str = LangUtils::map_from_lingua_language(*lang);
+                debug!("Using provided language: {}", lang_str);
+                *lang
             }
             None => {
                 debug!("No language provided, running language detection");
@@ -831,16 +838,13 @@ impl AnalysisPipeline {
                     "Detected language: {} (confidence: {:.2})",
                     detection_result.language, detection_result.confidence
                 );
-                *language_cache = Some(detection_result.language.clone());
-                detection_result.language
+                let detected_lang = detection_result.get_language();
+                *language_cache = Some(detected_lang);
+                detected_lang
             }
         };
 
-        let mut text_recognizer = Crnn::new(&language)
-            .map_err(|source| DocumentError::ModelProcessingError { source })?;
-
-        let words = text_recognizer
-            .get_texts(&rotated_parts, &mut text_lines)
+        let words = Crnn::recognize(language, &rotated_parts, &mut text_lines)
             .map_err(|source| DocumentError::ModelProcessingError { source })?;
         debug!("Recognized text for {} lines", words.len());
 
@@ -878,7 +882,7 @@ impl AnalysisPipeline {
     ///   Results are written directly to the page structures.
     /// * `questions` - Slice of questions to answer based on document content.
     ///   The same questions are asked for each page.
-    /// * `language` - Optional language code to use for text recognition.
+    /// * `language` - Optional `Language` enum to use for text recognition.
     ///   If `None`, the language will be auto-detected on the first page
     ///   and cached for subsequent pages.
     ///
@@ -896,7 +900,7 @@ impl AnalysisPipeline {
         &self,
         content: &mut dyn DocumentContent,
         questions: &[String],
-        language: Option<String>,
+        language: Option<Language>,
     ) -> Result<
         Vec<crate::inference::tasks::question_and_answer_task::QuestionAndAnswerResult>,
         DocumentError,
@@ -910,6 +914,12 @@ impl AnalysisPipeline {
             self.process_page(page, questions, &mut language_cache)?;
 
             all_qa_results.extend(page.question_answers.clone());
+        }
+
+        if let Ok(removed) = Crnn::cleanup_except(language) {
+            if removed > 0 {
+                debug!("Cleaned up {} dynamically loaded CRNN model(s)", removed);
+            }
         }
 
         Ok(all_qa_results)

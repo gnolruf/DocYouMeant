@@ -26,6 +26,7 @@ pub use error::DocumentError;
 pub use layout_box::{LayoutBox, LayoutClass};
 pub use text_box::TextBox;
 
+use crate::utils::lang_utils::LangUtils;
 use content::{CsvContent, ExcelContent, PdfContent, TextContent, WordContent};
 
 /// Represents a loaded document that can be analyzed for content extraction.
@@ -154,7 +155,8 @@ impl Document {
         };
 
         let questions = questions.unwrap_or(&[]);
-        let question_answers = pipeline.analyze(content, questions, language.map(String::from))?;
+        let language_enum = language.and_then(LangUtils::parse_language);
+        let question_answers = pipeline.analyze(content, questions, language_enum)?;
 
         self.question_answers = question_answers;
 

@@ -6,6 +6,8 @@ use docyoumeant::inference::rtdetr::{RtDetr, RtDetrMode};
 use docyoumeant::inference::tasks::question_and_answer_task::QuestionAndAnswerTask;
 use docyoumeant::server;
 use docyoumeant::utils::config::AppConfig;
+use docyoumeant::utils::lang_utils::LangUtils;
+use lingua::Language;
 use std::env;
 
 #[derive(Parser, Debug)]
@@ -31,7 +33,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
-    run_server(args.language).await?;
+    // Parse language from command line argument (None if not provided)
+    let language = args
+        .language
+        .as_ref()
+        .and_then(|s| LangUtils::parse_language(s));
+
+    run_server(language).await?;
 
     Ok(())
 }
@@ -49,13 +57,13 @@ fn setup_ort() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn run_server(language: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_server(language: Option<Language>) -> Result<(), Box<dyn std::error::Error>> {
     let config = AppConfig::get();
     let addr = &config.host_url;
 
     let socket_addr: std::net::SocketAddr = addr.parse()?;
 
-    initialize_models(language.as_deref()).await?;
+    initialize_models(language).await?;
 
     server::start_server(socket_addr).await?;
 
@@ -70,8 +78,10 @@ async fn run_server(language: Option<String>) -> Result<(), Box<dyn std::error::
 ///
 /// # Arguments
 ///
-/// * `ocr_language` - Optional language code for the OCR model to preload.
-async fn initialize_models(ocr_language: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+/// * `ocr_language` - Optional `Language` enum for the OCR model to preload.
+async fn initialize_models(
+    ocr_language: Option<Language>,
+) -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Preloading models...");
 
     tracing::info!("  Loading DBNet (text detection)...");
@@ -99,8 +109,9 @@ async fn initialize_models(ocr_language: Option<&str>) -> Result<(), Box<dyn std
     QuestionAndAnswerTask::get_or_init()?;
 
     if let Some(language) = ocr_language {
-        tracing::info!("  Loading Crnn ({} text recognition)...", language);
-        let _ = Crnn::new(language)?;
+        let lang_str = LangUtils::map_from_lingua_language(language);
+        tracing::info!("  Loading Crnn ({} text recognition)...", lang_str);
+        Crnn::get_or_init(language)?;
     }
 
     tracing::info!("All models preloaded successfully.");

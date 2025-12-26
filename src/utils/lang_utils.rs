@@ -33,26 +33,27 @@ pub struct LanguageModelInfo {
 pub struct LangUtils;
 
 impl LangUtils {
-    /// Retrieves the configuration for a specific language.
+    /// Retrieves the information about the model for a specific language.
     ///
-    /// Looks up the language configuration from the JSON config file. If the config file
-    /// cannot be read and the requested language is "english", returns a default English
-    /// configuration as a fallback.
+    /// Looks up the language model info from the JSON model config file using the
+    /// Lingua `Language` enum. If the model config file cannot be read and the
+    /// requested language is English, returns a default English configuration as a fallback.
     ///
     /// # Arguments
     ///
-    /// * `language` - The name of the language to look up (e.g., "english", "chinese").
+    /// * `language` - The Lingua `Language` enum value to look up.
     ///
     /// # Returns
     ///
-    /// * `Some(LanguageConfig)` - The configuration for the requested language if found.
+    /// * `Some(LanguageModelInfo)` - The configuration for the requested language if found.
     /// * `None` - If the language is not supported or not found in the configuration.
-    pub fn get_language_config(language: &str) -> Option<LanguageModelInfo> {
+    pub fn get_language_model_info(language: Language) -> Option<LanguageModelInfo> {
+        let language_str = Self::map_from_lingua_language(language);
         let config = AppConfig::get();
         match Self::get_all_language_configs(false) {
-            Ok(configs) => configs.get(language).cloned(),
+            Ok(configs) => configs.get(&language_str).cloned(),
             Err(_) => {
-                if language == "english" {
+                if language == Language::English {
                     Some(LanguageModelInfo {
                         name: "english".to_string(),
                         model_file: config.model_path("onnx/text_recognition_en.onnx"),
@@ -64,6 +65,23 @@ impl LangUtils {
                 }
             }
         }
+    }
+
+    /// Parses a language string and returns the corresponding Lingua Language enum.
+    ///
+    /// This is useful for converting command-line arguments or configuration strings
+    /// to type-safe Language enum values.
+    ///
+    /// # Arguments
+    ///
+    /// * `language_str` - The language name string to parse (case-insensitive).
+    ///
+    /// # Returns
+    ///
+    /// * `Some(Language)` - The corresponding Lingua `Language` enum variant.
+    /// * `None` - If the language string is not recognized.
+    pub fn parse_language(language_str: &str) -> Option<Language> {
+        Self::map_to_lingua_language(language_str)
     }
 
     /// Retrieves all available language configurations.

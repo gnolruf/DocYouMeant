@@ -18,7 +18,7 @@ use crate::inference::error::InferenceError;
 use crate::utils::config::AppConfig;
 use crate::utils::image_utils;
 
-use crate::impl_mode_singleton;
+use crate::impl_static_keyed_singleton;
 
 /// Operating mode for the LCNet classifier.
 ///
@@ -557,9 +557,9 @@ impl LCNet {
     }
 }
 
-impl_mode_singleton!(
+impl_static_keyed_singleton!(
     model: LCNet,
-    mode_type: LCNetMode,
+    key_type: LCNetMode,
     variants: {
         TextOrientation => TEXT_ORIENTATION_INSTANCE,
         DocumentOrientation => DOCUMENT_ORIENTATION_INSTANCE,

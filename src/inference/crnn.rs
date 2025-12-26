@@ -9,10 +9,12 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 
 use image::{imageops, Rgb, RgbImage};
+use lingua::Language;
 use ort::{inputs, session::Session, value::Value};
 
 use crate::document::bounds::Bounds;
 use crate::document::text_box::TextBox;
+use crate::impl_keyed_singleton;
 use crate::inference::error::InferenceError;
 use crate::utils::image_utils;
 use crate::utils::lang_utils::LangUtils;
@@ -34,9 +36,9 @@ use geo::Coord;
 ///
 /// # Thread Safety
 ///
-/// Unlike other inference modules, `Crnn` is not a singleton. Each language
-/// requires its own instance with the appropriate model and dictionary.
-/// For multi-threaded usage, create separate instances or wrap in `Arc<Mutex<Crnn>>`.
+/// `Crnn` uses the keyed singleton pattern with `Language` as the key.
+/// Each language has its own singleton instance, allowing thread-safe access
+/// through the `with_instance` method.
 pub struct Crnn {
     session: Session,
     keys: Vec<String>,
@@ -65,7 +67,7 @@ impl Crnn {
     ///
     /// # Arguments
     ///
-    /// * `language` - Language identifier (e.g., "english", "chinese", "arabic")
+    /// * `language` - Lingua `Language` enum identifying the language
     ///
     /// # Returns
     ///
@@ -78,11 +80,12 @@ impl Crnn {
     /// - The specified language is not supported
     /// - The model file cannot be loaded
     /// - The dictionary file cannot be read or parsed
-    pub fn new(language: &str) -> Result<Self, InferenceError> {
-        let config = LangUtils::get_language_config(language).ok_or_else(|| {
+    pub fn new(language: Language) -> Result<Self, InferenceError> {
+        let config = LangUtils::get_language_model_info(language).ok_or_else(|| {
+            let lang_str = LangUtils::map_from_lingua_language(language);
             InferenceError::ModelFileLoadError {
-                path: format!("Unsupported language: {language}").into(),
-                source: ort::Error::new(format!("Unsupported language: {language}")),
+                path: format!("Unsupported language: {lang_str}").into(),
+                source: ort::Error::new(format!("Unsupported language: {lang_str}")),
             }
         })?;
 
@@ -121,6 +124,29 @@ impl Crnn {
             norm_values: [1.0 / 127.5, 1.0 / 127.5, 1.0 / 127.5],
             dst_height: 48,
         })
+    }
+
+    /// Recognizes text from images using the singleton instance for the specified language.
+    ///
+    /// This is the preferred method for text recognition as it uses the keyed singleton
+    /// pattern for efficient resource management.
+    ///
+    /// # Arguments
+    ///
+    /// * `language` - The language to use for text recognition
+    /// * `part_imgs` - Slice of RGB images, one per text line
+    /// * `text_boxes` - Mutable slice of text boxes to update with results
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<TextBox>)` - All word-level text boxes from all lines
+    /// * `Err(InferenceError)` - If recognition fails
+    pub fn recognize(
+        language: Language,
+        part_imgs: &[RgbImage],
+        text_boxes: &mut [TextBox],
+    ) -> Result<Vec<TextBox>, InferenceError> {
+        Self::with_instance(language, |crnn| crnn.get_texts(part_imgs, text_boxes))
     }
 
     /// Recognizes text from a single text line image.
@@ -493,3 +519,9 @@ impl Crnn {
         Ok(all_words)
     }
 }
+
+impl_keyed_singleton!(
+    model: Crnn,
+    key_type: Language,
+    instance: CRNN_INSTANCES
+);

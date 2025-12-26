@@ -20,7 +20,7 @@ use crate::inference::error::InferenceError;
 use crate::utils::config::AppConfig;
 use crate::utils::{box_utils, image_utils};
 
-use crate::impl_mode_singleton;
+use crate::impl_static_keyed_singleton;
 
 /// Operating mode for the RT-DETR detector.
 ///
@@ -428,9 +428,9 @@ impl RtDetr {
     }
 }
 
-impl_mode_singleton!(
+impl_static_keyed_singleton!(
     model: RtDetr,
-    mode_type: RtDetrMode,
+    key_type: RtDetrMode,
     variants: {
         Layout => LAYOUT_DETECTION_INSTANCE,
         WiredTableCell => WIRED_TABLE_CELL_DETECTION_INSTANCE,
