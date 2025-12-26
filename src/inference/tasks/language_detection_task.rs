@@ -31,12 +31,7 @@ const MAX_SAMPLE_LINES: usize = 3;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguageDetectionResult {
     /// The detected language as a Lingua `Language` enum.
-    #[serde(skip)]
-    pub language_enum: Option<Language>,
-    /// The detected language name (e.g., "english", "chinese", "arabic").
-    ///
-    /// This corresponds to language identifiers used by [`LangUtils`].
-    pub language: String,
+    pub language: Language,
     /// The filename of the OCR model that produced the best results.
     ///
     /// This may be empty for text-based detection where no OCR model is used.
@@ -50,7 +45,7 @@ pub struct LanguageDetectionResult {
 }
 
 impl LanguageDetectionResult {
-    /// Creates a new `LanguageDetectionResult` from a Language enum.
+    /// Creates a new `LanguageDetectionResult`.
     ///
     /// # Arguments
     ///
@@ -62,43 +57,24 @@ impl LanguageDetectionResult {
     ///
     /// A new `LanguageDetectionResult` instance.
     #[must_use]
-    pub fn from_language(language: Language, model_file: String, confidence: f32) -> Self {
+    pub fn new(language: Language, model_file: String, confidence: f32) -> Self {
         Self {
-            language_enum: Some(language),
-            language: LangUtils::map_from_lingua_language(language),
-            model_file,
-            confidence,
-        }
-    }
-
-    /// Creates a new `LanguageDetectionResult` from a language string.
-    ///
-    /// # Arguments
-    ///
-    /// * `language` - The detected language name.
-    /// * `model_file` - The OCR model filename used for detection.
-    /// * `confidence` - The confidence score (0.0 to 1.0).
-    ///
-    /// # Returns
-    ///
-    /// A new `LanguageDetectionResult` instance.
-    #[must_use]
-    pub fn new(language: String, model_file: String, confidence: f32) -> Self {
-        let language_enum = LangUtils::parse_language(&language);
-        Self {
-            language_enum,
             language,
             model_file,
             confidence,
         }
     }
 
-    /// Gets the detected language as a Lingua `Language` enum.
+    /// Gets the detected language name as a lowercase string.
     ///
-    /// Falls back to `Language::English` if the language couldn't be parsed.
+    /// This is useful for logging or when a string representation is needed.
+    ///
+    /// # Returns
+    ///
+    /// A lowercase string representation of the language (e.g., "english", "chinese").
     #[must_use]
-    pub fn get_language(&self) -> Language {
-        self.language_enum.unwrap_or(Language::English)
+    pub fn language_name(&self) -> String {
+        LangUtils::map_from_lingua_language(self.language)
     }
 }
 
@@ -362,7 +338,13 @@ impl LanguageDetectionTask {
         }
 
         let language = LangUtils::detect_language(&recognized_texts, &candidate_languages)
-            .unwrap_or_else(|| best_group.languages.first().cloned().unwrap_or_default());
+            .unwrap_or_else(|| {
+                best_group
+                    .languages
+                    .first()
+                    .and_then(|l| LangUtils::parse_language(l))
+                    .unwrap_or(Language::English)
+            });
 
         Ok(LanguageDetectionResult::new(
             language,
@@ -408,8 +390,8 @@ impl LanguageDetectionTask {
 
         let candidate_languages: Vec<String> = configs.keys().cloned().collect();
 
-        let language = LangUtils::detect_language(texts, &candidate_languages)
-            .unwrap_or_else(|| "english".to_string());
+        let language =
+            LangUtils::detect_language(texts, &candidate_languages).unwrap_or(Language::English);
 
         Ok(LanguageDetectionResult::new(language, String::new(), 1.0))
     }

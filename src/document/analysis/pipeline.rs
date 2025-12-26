@@ -662,11 +662,10 @@ impl AnalysisPipeline {
                     .map_err(|source| DocumentError::ModelProcessingError { source })?;
                 debug!(
                     "Detected language from embedded text: {}",
-                    detection_result.language
+                    detection_result.language_name()
                 );
-                let detected_lang = detection_result.get_language();
-                *language_cache = Some(detected_lang);
-                detected_lang
+                *language_cache = Some(detection_result.language);
+                detection_result.language
             }
         };
 
@@ -836,11 +835,11 @@ impl AnalysisPipeline {
                         .map_err(|source| DocumentError::ModelProcessingError { source })?;
                 debug!(
                     "Detected language: {} (confidence: {:.2})",
-                    detection_result.language, detection_result.confidence
+                    detection_result.language_name(),
+                    detection_result.confidence
                 );
-                let detected_lang = detection_result.get_language();
-                *language_cache = Some(detected_lang);
-                detected_lang
+                *language_cache = Some(detection_result.language);
+                detection_result.language
             }
         };
 

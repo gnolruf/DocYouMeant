@@ -135,15 +135,15 @@ impl LangUtils {
     ///
     /// # Returns
     ///
-    /// * `Some(String)` - The detected language name if detection succeeds.
+    /// * `Some(Language)` - The detected language if detection succeeds.
     /// * `None` - If `texts` or `candidate_languages` is empty.
     ///
     /// # Notes
     ///
     /// - If none of the candidate languages can be mapped to Lingua's supported languages,
-    ///   the first candidate language is returned as a fallback.
+    ///   the first parseable candidate language is returned as a fallback.
     /// - If Lingua cannot confidently detect a language, the first candidate is returned.
-    pub fn detect_language(texts: &[String], candidate_languages: &[String]) -> Option<String> {
+    pub fn detect_language(texts: &[String], candidate_languages: &[String]) -> Option<Language> {
         if texts.is_empty() || candidate_languages.is_empty() {
             return None;
         }
@@ -154,7 +154,9 @@ impl LangUtils {
             .collect();
 
         if lingua_languages.is_empty() {
-            return candidate_languages.first().cloned();
+            return candidate_languages
+                .first()
+                .and_then(|l| Self::map_to_lingua_language(l));
         }
 
         let detector: LanguageDetector = LanguageDetectorBuilder::from_languages(&lingua_languages)
@@ -165,8 +167,7 @@ impl LangUtils {
 
         detector
             .detect_language_of(&combined_text)
-            .map(Self::map_from_lingua_language)
-            .or_else(|| candidate_languages.first().cloned())
+            .or_else(|| lingua_languages.first().copied())
     }
 
     /// Maps an internal language name to a Lingua `Language` enum variant.
