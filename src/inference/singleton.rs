@@ -121,7 +121,7 @@ macro_rules! impl_keyed_singleton {
                 })?;
 
                 if !write_guard.contains_key(&key) {
-                    let model = Self::new(key)?;
+                    let model = Self::new(key.clone())?;
                     write_guard.insert(key, ::std::sync::Mutex::new(model));
                 }
 
@@ -154,7 +154,7 @@ macro_rules! impl_keyed_singleton {
             where
                 F: FnOnce(&mut Self) -> Result<R, $crate::inference::InferenceError>,
             {
-                Self::get_or_init(key)?;
+                Self::get_or_init(key.clone())?;
 
                 let map = $instance.get().ok_or_else(|| {
                     $crate::inference::InferenceError::ProcessingError {
@@ -181,49 +181,6 @@ macro_rules! impl_keyed_singleton {
                 })?;
 
                 f(&mut model)
-            }
-
-            /// Removes all cached model instances except for the specified key.
-            ///
-            /// This method is useful for cleaning up dynamically loaded models while
-            /// preserving a pre-initialized default model (e.g., from CLI arguments).
-            ///
-            /// # Arguments
-            ///
-            /// * `keep_key` - Optional key to preserve. If `None`, all instances are removed.
-            ///
-            /// # Returns
-            ///
-            /// The number of instances that were removed.
-            ///
-            /// # Errors
-            ///
-            /// Returns an [`InferenceError`] if lock acquisition fails.
-            pub fn cleanup_except(
-                keep_key: Option<$key_type>,
-            ) -> Result<usize, $crate::inference::InferenceError> {
-                let Some(map) = $instance.get() else {
-                    return Ok(0);
-                };
-
-                let mut write_guard = map.write().map_err(|e| {
-                    $crate::inference::InferenceError::ProcessingError {
-                        message: format!("Failed to acquire write lock for cleanup: {e}"),
-                    }
-                })?;
-
-                let keys_to_remove: Vec<$key_type> = write_guard
-                    .keys()
-                    .filter(|k| keep_key.map_or(true, |keep| *k != &keep))
-                    .copied()
-                    .collect();
-
-                let count = keys_to_remove.len();
-                for key in keys_to_remove {
-                    write_guard.remove(&key);
-                }
-
-                Ok(count)
             }
         }
     };

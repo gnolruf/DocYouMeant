@@ -24,6 +24,15 @@ pub struct LanguageModelInfo {
     pub is_script_model: bool,
 }
 
+/// A group of languages that share the same OCR model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelGroup {
+    /// The filename of the OCR model for this group.
+    pub model_file: String,
+    /// The list of language names that use this model.
+    pub languages: Vec<String>,
+}
+
 /// Utility struct for language detection and configuration management.
 ///
 /// Provides static methods for:
@@ -120,6 +129,54 @@ impl LangUtils {
         } else {
             Ok(configs)
         }
+    }
+
+    /// Builds a mapping of OCR model files to their supported languages.
+    ///
+    /// # Arguments
+    ///
+    /// * `script_models_only` - If `true`, only includes script-based models.
+    ///
+    /// # Returns
+    ///
+    /// A `HashMap` where keys are model filenames and values are [`ModelGroup`]
+    /// instances containing the model file and list of supported languages.
+    pub fn get_model_groups(
+        script_models_only: bool,
+    ) -> Result<HashMap<String, ModelGroup>, Box<dyn std::error::Error>> {
+        let configs = Self::get_all_language_configs(script_models_only)?;
+        let mut model_groups: HashMap<String, ModelGroup> = HashMap::new();
+
+        for (lang_name, config) in configs {
+            let entry = model_groups
+                .entry(config.model_file.clone())
+                .or_insert_with(|| ModelGroup {
+                    model_file: config.model_file.clone(),
+                    languages: Vec::new(),
+                });
+
+            entry.languages.push(lang_name);
+        }
+
+        Ok(model_groups)
+    }
+
+    /// Retrieves the model configuration for a specific model file.
+    ///
+    /// # Arguments
+    ///
+    /// * `model_file` - The path to the model file.
+    ///
+    /// # Returns
+    ///
+    /// * `Some(LanguageModelInfo)` - The configuration for the model if found.
+    /// * `None` - If no language uses this model file.
+    pub fn get_model_info_by_file(model_file: &str) -> Option<LanguageModelInfo> {
+        let configs = Self::get_all_language_configs(false).ok()?;
+        configs
+            .values()
+            .find(|c| c.model_file == model_file)
+            .cloned()
     }
 
     /// Detects the most likely language from a collection of text samples.

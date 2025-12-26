@@ -915,12 +915,6 @@ impl AnalysisPipeline {
             all_qa_results.extend(page.question_answers.clone());
         }
 
-        if let Ok(removed) = Crnn::cleanup_except(language) {
-            if removed > 0 {
-                debug!("Cleaned up {} dynamically loaded CRNN model(s)", removed);
-            }
-        }
-
         Ok(all_qa_results)
     }
 }

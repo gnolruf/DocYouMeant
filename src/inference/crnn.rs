@@ -49,7 +49,7 @@ pub struct Crnn {
 
 impl_keyed_singleton!(
     model: Crnn,
-    key_type: Language,
+    key_type: String,
     instance: CRNN_INSTANCES
 );
 
@@ -57,32 +57,31 @@ impl Crnn {
     /// Number of threads for ONNX Runtime inter-op parallelism.
     const NUM_THREADS: usize = 4;
 
-    /// Creates a new CRNN text recognizer for the specified language.
+    /// Creates a new CRNN text recognizer for the specified model file.
     ///
     /// Loads the appropriate ONNX model and character dictionary based on
-    /// the language configuration from `models/ocr_lang_models.json`.
+    /// the model file configuration.
     ///
     /// # Arguments
     ///
-    /// * `language` - Lingua `Language` enum identifying the language
+    /// * `model_file` - Path to the ONNX model file
     ///
     /// # Returns
     ///
     /// * `Ok(Crnn)` - Initialized recognizer ready for inference
-    /// * `Err(InferenceError)` - If the language is unsupported or model files cannot be loaded
+    /// * `Err(InferenceError)` - If the model file is unsupported or cannot be loaded
     ///
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The specified language is not supported
+    /// - The specified model file is not supported
     /// - The model file cannot be loaded
     /// - The dictionary file cannot be read or parsed
-    pub fn new(language: Language) -> Result<Self, InferenceError> {
-        let config = LangUtils::get_language_model_info(language).ok_or_else(|| {
-            let lang_str = LangUtils::map_from_lingua_language(language);
+    pub fn new(model_file: String) -> Result<Self, InferenceError> {
+        let config = LangUtils::get_model_info_by_file(&model_file).ok_or_else(|| {
             InferenceError::ModelFileLoadError {
-                path: format!("Unsupported language: {lang_str}").into(),
-                source: ort::Error::new(format!("Unsupported language: {lang_str}")),
+                path: format!("Unsupported model file: {model_file}").into(),
+                source: ort::Error::new(format!("Unsupported model file: {model_file}")),
             }
         })?;
 
@@ -149,7 +148,16 @@ impl Crnn {
         part_imgs: &[RgbImage],
         text_boxes: &mut [TextBox],
     ) -> Result<Vec<TextBox>, InferenceError> {
-        Self::with_instance(language, |crnn| crnn.get_texts(part_imgs, text_boxes))
+        let model_info = LangUtils::get_language_model_info(language).ok_or_else(|| {
+            let lang_str = LangUtils::map_from_lingua_language(language);
+            InferenceError::ModelFileLoadError {
+                path: format!("Unsupported language: {lang_str}").into(),
+                source: ort::Error::new(format!("Unsupported language: {lang_str}")),
+            }
+        })?;
+        Self::with_instance(model_info.model_file, |crnn| {
+            crnn.get_texts(part_imgs, text_boxes)
+        })
     }
 
     /// Recognizes text from multiple text line images in batch.

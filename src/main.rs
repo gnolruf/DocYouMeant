@@ -111,7 +111,11 @@ async fn initialize_models(
     if let Some(language) = ocr_language {
         let lang_str = LangUtils::map_from_lingua_language(language);
         tracing::info!("  Loading Crnn ({} text recognition)...", lang_str);
-        Crnn::get_or_init(language)?;
+
+        let model_info = LangUtils::get_language_model_info(language)
+            .ok_or_else(|| format!("Unsupported language: {}", lang_str))?;
+
+        Crnn::get_or_init(model_info.model_file)?;
     }
 
     tracing::info!("All models preloaded successfully.");
