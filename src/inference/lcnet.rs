@@ -9,9 +9,7 @@
 
 use image::{imageops, Rgb, RgbImage};
 use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
-use once_cell::sync::OnceCell;
 use ort::{inputs, session::Session, value::Value};
-use std::sync::Mutex;
 use tracing::{error, warn};
 
 use crate::document::table::TableType;
@@ -20,9 +18,7 @@ use crate::inference::error::InferenceError;
 use crate::utils::config::AppConfig;
 use crate::utils::image_utils;
 
-static TEXT_ORIENTATION_INSTANCE: OnceCell<Mutex<LCNet>> = OnceCell::new();
-static DOCUMENT_ORIENTATION_INSTANCE: OnceCell<Mutex<LCNet>> = OnceCell::new();
-static TABLE_CLASSIFICATION_INSTANCE: OnceCell<Mutex<LCNet>> = OnceCell::new();
+use crate::impl_mode_singleton;
 
 /// Operating mode for the LCNet classifier.
 ///
@@ -147,52 +143,6 @@ impl LCNet {
             dst_width,
             mode,
         })
-    }
-
-    /// Pre-initializes the LCNet singleton for the specified mode.
-    ///
-    /// Call this method during application startup to eagerly load models
-    /// rather than waiting for the first classification request.
-    ///
-    /// # Arguments
-    ///
-    /// * `mode` - The classification mode to initialize
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` - Model successfully initialized
-    /// * `Err(InferenceError)` - If initialization fails
-    pub fn get_or_init(mode: LCNetMode) -> Result<(), InferenceError> {
-        match mode {
-            LCNetMode::TextOrientation => {
-                TEXT_ORIENTATION_INSTANCE
-                    .get_or_try_init(|| Self::new(LCNetMode::TextOrientation).map(Mutex::new))?;
-            }
-            LCNetMode::DocumentOrientation => {
-                DOCUMENT_ORIENTATION_INSTANCE.get_or_try_init(|| {
-                    Self::new(LCNetMode::DocumentOrientation).map(Mutex::new)
-                })?;
-            }
-            LCNetMode::TableType => {
-                TABLE_CLASSIFICATION_INSTANCE
-                    .get_or_try_init(|| Self::new(LCNetMode::TableType).map(Mutex::new))?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Returns a reference to the singleton instance for the specified mode.
-    ///
-    /// Initializes the instance if it hasn't been created yet.
-    fn instance(mode: LCNetMode) -> Result<&'static Mutex<LCNet>, InferenceError> {
-        match mode {
-            LCNetMode::TextOrientation => TEXT_ORIENTATION_INSTANCE
-                .get_or_try_init(|| Self::new(LCNetMode::TextOrientation).map(Mutex::new)),
-            LCNetMode::DocumentOrientation => DOCUMENT_ORIENTATION_INSTANCE
-                .get_or_try_init(|| Self::new(LCNetMode::DocumentOrientation).map(Mutex::new)),
-            LCNetMode::TableType => TABLE_CLASSIFICATION_INSTANCE
-                .get_or_try_init(|| Self::new(LCNetMode::TableType).map(Mutex::new)),
-        }
     }
 
     /// Applies majority voting to normalize orientation predictions.
@@ -606,3 +556,13 @@ impl LCNet {
         }
     }
 }
+
+impl_mode_singleton!(
+    model: LCNet,
+    mode_type: LCNetMode,
+    variants: {
+        TextOrientation => TEXT_ORIENTATION_INSTANCE,
+        DocumentOrientation => DOCUMENT_ORIENTATION_INSTANCE,
+        TableType => TABLE_CLASSIFICATION_INSTANCE,
+    }
+);

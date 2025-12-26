@@ -77,7 +77,7 @@ impl QuestionAndAnswerTask {
     /// - The tokenizer fails to initialize
     /// - There is insufficient memory to load the model
     pub fn get_or_init() -> Result<(), InferenceError> {
-        Phi4MiniInference::get_or_init()
+        Phi4MiniInference::init_all()
     }
 
     /// Answers a question based on the provided document context.

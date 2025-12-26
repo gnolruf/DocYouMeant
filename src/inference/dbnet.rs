@@ -14,9 +14,7 @@ use imageproc::morphology::dilate;
 use imageproc::point::Point;
 use imageproc::point::Point as ImageProcPoint;
 use ndarray::Array2;
-use once_cell::sync::OnceCell;
 use ort::{inputs, session::Session, value::Value};
-use std::sync::Mutex;
 
 use crate::document::bounds::Bounds;
 use crate::document::TextBox;
@@ -24,7 +22,7 @@ use crate::inference::error::InferenceError;
 use crate::utils::config::AppConfig;
 use crate::utils::{box_utils, image_utils};
 
-static DBNET_INSTANCE: OnceCell<Mutex<DBNet>> = OnceCell::new();
+use crate::impl_simple_singleton;
 
 /// Text detection model using Differentiable Binarization Network.
 ///
@@ -117,29 +115,6 @@ impl DBNet {
             dst_dimensions: [0, 0],
             padding: [0, 0, 0, 0],
         })
-    }
-
-    /// Pre-initializes the DBNet singleton instance.
-    ///
-    /// Call this method during application startup to eagerly load the model
-    /// rather than waiting for the first detection request. This is useful
-    /// for reducing latency on the first inference call.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` - Model successfully initialized
-    /// * `Err(InferenceError)` - If initialization fails
-    pub fn get_or_init() -> Result<(), InferenceError> {
-        DBNET_INSTANCE.get_or_try_init(|| Self::new().map(Mutex::new))?;
-        Ok(())
-    }
-
-    /// Returns a reference to the singleton DBNet instance.
-    ///
-    /// Initializes the instance if it hasn't been created yet.
-    /// This is an internal method used by the `run()` function.
-    fn instance() -> Result<&'static Mutex<DBNet>, InferenceError> {
-        DBNET_INSTANCE.get_or_try_init(|| Self::new().map(Mutex::new))
     }
 
     /// Preprocesses an image for text detection.
@@ -612,3 +587,9 @@ impl DBNet {
         model.detect(&preprocessed)
     }
 }
+
+impl_simple_singleton!(
+    model: DBNet,
+    instance: DBNET_INSTANCE,
+    init: || Self::new()
+);
