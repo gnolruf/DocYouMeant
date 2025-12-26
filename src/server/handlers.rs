@@ -4,11 +4,15 @@
 //! and produce responses. Each handler corresponds to an API endpoint defined in
 //! the router.
 
+use axum::extract::State;
 use axum::response::Json;
+use std::sync::Arc;
 
 use super::error::AppError;
 use super::models::{AnalysisRequest, AnalyzeResponse, HealthResponse};
+use super::AppState;
 use crate::document::Document;
+use crate::utils::lang_utils::LangUtils;
 
 /// Health check endpoint handler.
 ///
@@ -59,6 +63,7 @@ pub async fn health() -> Json<HealthResponse> {
 /// 4. Run the analysis pipeline
 /// 5. Return structured results
 pub async fn analyze_document(
+    State(state): State<Arc<AppState>>,
     Json(request): Json<AnalysisRequest>,
 ) -> Result<Json<AnalyzeResponse>, AppError> {
     tracing::info!(
@@ -74,7 +79,14 @@ pub async fn analyze_document(
     tracing::info!("Document loaded with type: {:?}", document.doc_type());
 
     let questions = request.questions.as_deref();
-    document.analyze(questions, &request.process_id, request.language.as_deref())?;
+
+    let language = request
+        .language
+        .as_deref()
+        .and_then(LangUtils::parse_language)
+        .or(state.default_language);
+
+    document.analyze(questions, &request.process_id, language)?;
 
     tracing::info!("Document analysis completed successfully");
 

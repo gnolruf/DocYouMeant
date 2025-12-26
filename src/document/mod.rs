@@ -26,8 +26,8 @@ pub use error::DocumentError;
 pub use layout_box::{LayoutBox, LayoutClass};
 pub use text_box::TextBox;
 
-use crate::utils::lang_utils::LangUtils;
 use content::{CsvContent, ExcelContent, PdfContent, TextContent, WordContent};
+use lingua::Language;
 
 /// Represents a loaded document that can be analyzed for content extraction.
 ///
@@ -130,7 +130,7 @@ impl Document {
     ///
     /// * `questions` - Optional slice of questions to answer about the document
     /// * `process_id` - Unique identifier for this analysis process (used for logging/tracking)
-    /// * `language` - Optional language hint for OCR (e.g., "en", "ch", "arabic")
+    /// * `language` - Optional language hint for OCR
     ///
     /// # Returns
     ///
@@ -141,7 +141,7 @@ impl Document {
         &mut self,
         questions: Option<&[String]>,
         process_id: &str,
-        language: Option<&str>,
+        language: Option<Language>,
     ) -> Result<(), DocumentError> {
         self.process_id = process_id.to_string();
         let doc_type = self.doc_type.clone();
@@ -155,8 +155,7 @@ impl Document {
         };
 
         let questions = questions.unwrap_or(&[]);
-        let language_enum = language.and_then(LangUtils::parse_language);
-        let question_answers = pipeline.analyze(content, questions, language_enum)?;
+        let question_answers = pipeline.analyze(content, questions, language)?;
 
         self.question_answers = question_answers;
 

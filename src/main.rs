@@ -65,7 +65,7 @@ async fn run_server(language: Option<Language>) -> Result<(), Box<dyn std::error
 
     initialize_models(language).await?;
 
-    server::start_server(socket_addr).await?;
+    server::start_server(socket_addr, language).await?;
 
     Ok(())
 }
@@ -116,6 +116,12 @@ async fn initialize_models(
             .ok_or_else(|| format!("Unsupported language: {}", lang_str))?;
 
         Crnn::get_or_init(model_info.model_file)?;
+    } else {
+        tracing::info!("  Loading CRNN models (OCR)...");
+        let model_groups = LangUtils::get_model_groups(false)?;
+        for (model_file, _) in model_groups {
+            Crnn::get_or_init(model_file)?;
+        }
     }
 
     tracing::info!("All models preloaded successfully.");
