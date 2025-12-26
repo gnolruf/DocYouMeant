@@ -73,6 +73,16 @@ pub struct LCNet {
     mode: LCNetMode,
 }
 
+impl_static_keyed_singleton!(
+    model: LCNet,
+    key_type: LCNetMode,
+    variants: {
+        TextOrientation => TEXT_ORIENTATION_INSTANCE,
+        DocumentOrientation => DOCUMENT_ORIENTATION_INSTANCE,
+        TableType => TABLE_CLASSIFICATION_INSTANCE,
+    }
+);
+
 impl LCNet {
     /// Path to the text orientation classification model.
     const TEXT_ORIENTATION_MODEL_PATH: &'static str = "onnx/text_orientation_classification.onnx";
@@ -556,13 +566,3 @@ impl LCNet {
         }
     }
 }
-
-impl_static_keyed_singleton!(
-    model: LCNet,
-    key_type: LCNetMode,
-    variants: {
-        TextOrientation => TEXT_ORIENTATION_INSTANCE,
-        DocumentOrientation => DOCUMENT_ORIENTATION_INSTANCE,
-        TableType => TABLE_CLASSIFICATION_INSTANCE,
-    }
-);

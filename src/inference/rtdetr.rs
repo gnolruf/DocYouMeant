@@ -78,6 +78,16 @@ pub struct RtDetr {
     mode: RtDetrMode,
 }
 
+impl_static_keyed_singleton!(
+    model: RtDetr,
+    key_type: RtDetrMode,
+    variants: {
+        Layout => LAYOUT_DETECTION_INSTANCE,
+        WiredTableCell => WIRED_TABLE_CELL_DETECTION_INSTANCE,
+        WirelessTableCell => WIRELESS_TABLE_CELL_DETECTION_INSTANCE,
+    }
+);
+
 impl RtDetr {
     /// Path to the layout detection model.
     const LAYOUT_DETECTION_MODEL_PATH: &'static str = "onnx/layout_detection.onnx";
@@ -427,13 +437,3 @@ impl RtDetr {
         model.detect(&preprocessed)
     }
 }
-
-impl_static_keyed_singleton!(
-    model: RtDetr,
-    key_type: RtDetrMode,
-    variants: {
-        Layout => LAYOUT_DETECTION_INSTANCE,
-        WiredTableCell => WIRED_TABLE_CELL_DETECTION_INSTANCE,
-        WirelessTableCell => WIRELESS_TABLE_CELL_DETECTION_INSTANCE,
-    }
-);

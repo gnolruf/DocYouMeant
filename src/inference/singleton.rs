@@ -1,6 +1,6 @@
 //! Singleton pattern macros for inference models.
 //!
-//! This module provides macros to reduce boilerplate when implementing the singleton
+//! This module provides macros to when implementing the singleton
 //! pattern for inference models. Models are wrapped in `Mutex` for thread-safe access
 //! and stored in `OnceCell` for lazy initialization.
 //!

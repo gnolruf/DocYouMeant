@@ -42,12 +42,6 @@ use crate::impl_simple_singleton;
 /// - `src_dimensions`: Original input image dimensions `[width, height]`
 /// - `dst_dimensions`: Processed image dimensions after padding `[width, height]`
 /// - `padding`: Applied padding `[top, bottom, left, right]`
-///
-/// # Thread Safety
-///
-/// This struct is wrapped in a `Mutex` and accessed through a singleton pattern,
-/// making it safe to use from multiple threads. However, only one thread can
-/// perform inference at a time.
 pub struct DBNet {
     session: Session,
     mean_values: [f32; 3],
@@ -60,6 +54,12 @@ pub struct DBNet {
     dst_dimensions: [i32; 2], // [width, height]
     padding: [i32; 4],        // [top, bottom, left, right]
 }
+
+impl_simple_singleton!(
+    model: DBNet,
+    instance: DBNET_INSTANCE,
+    init: || Self::new()
+);
 
 impl DBNet {
     /// Path to the DBNet ONNX model file.
@@ -587,9 +587,3 @@ impl DBNet {
         model.detect(&preprocessed)
     }
 }
-
-impl_simple_singleton!(
-    model: DBNet,
-    instance: DBNET_INSTANCE,
-    init: || Self::new()
-);
