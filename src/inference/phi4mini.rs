@@ -15,9 +15,9 @@ use ort::{
     value::Value,
 };
 use std::path::Path;
-use std::sync::Mutex;
 use tokenizers::Tokenizer;
 
+use crate::impl_simple_singleton;
 use crate::inference::error::InferenceError;
 use crate::utils::config::AppConfig;
 
@@ -27,8 +27,6 @@ const MAX_LENGTH: usize = 4096;
 /// Size of the Phi-4-mini-instruct vocabulary.
 const VOCAB_SIZE: usize = 200_064;
 
-/// Singleton instance for the model.
-static PHI4MINI_INSTANCE: OnceCell<Mutex<Phi4MiniInference>> = OnceCell::new();
 /// Singleton instance for the tokenizer.
 static TOKENIZER_INSTANCE: OnceCell<Tokenizer> = OnceCell::new();
 
@@ -50,21 +48,27 @@ pub struct Phi4MiniInference {
     use_cuda: bool,
 }
 
+impl_simple_singleton!(
+    model: Phi4MiniInference,
+    instance: PHI4MINI_INSTANCE,
+    init: || Phi4MiniInference::new()
+);
+
 impl Phi4MiniInference {
     /// Creates a new Phi-4-mini-instruct inference instance.
     ///
     /// Loads the ONNX model and tokenizer, automatically selecting between
     /// GPU (CUDA) and CPU variants based on hardware availability.
     ///
-    /// # Arguments
-    ///
-    /// * `model_dir` - Path to the models directory containing `phi-4-mini-instruct/`
-    ///
     /// # Returns
     ///
     /// * `Ok(Phi4MiniInference)` - Initialized model ready for generation
     /// * `Err(InferenceError)` - If model files are missing or cannot be loaded
-    pub fn new(model_dir: &Path) -> Result<Self, InferenceError> {
+    pub fn new() -> Result<Self, InferenceError> {
+        let config = AppConfig::get();
+        let model_path_str = config.model_path("onnx");
+        let model_dir = Path::new(&model_path_str);
+
         let use_cuda = ort::execution_providers::CUDAExecutionProvider::default()
             .is_available()
             .unwrap_or(false);
@@ -147,22 +151,18 @@ impl Phi4MiniInference {
         })
     }
 
-    /// Pre-initializes the model and tokenizer singletons.
+    /// Pre-initializes both model and tokenizer singletons.
     ///
-    /// Call this method during application startup to eagerly load the model.
-    /// This can take several seconds depending on hardware and model size.
+    /// Call this method during application startup to eagerly load the model
+    /// and tokenizer. This wraps the macro-generated initialization and also
+    /// initializes the tokenizer singleton.
     ///
     /// # Returns
     ///
     /// * `Ok(())` - Model and tokenizer successfully initialized
     /// * `Err(InferenceError)` - If initialization fails
-    pub fn get_or_init() -> Result<(), InferenceError> {
-        PHI4MINI_INSTANCE.get_or_try_init(|| {
-            let config = AppConfig::get();
-            let model_path = config.model_path("onnx");
-            let model_dir = Path::new(&model_path);
-            Self::new(model_dir).map(Mutex::new)
-        })?;
+    pub fn init_all() -> Result<(), InferenceError> {
+        Self::get_or_init()?;
         Self::get_tokenizer()?;
         Ok(())
     }
@@ -208,12 +208,7 @@ impl Phi4MiniInference {
     where
         F: FnOnce(&mut Phi4MiniInference) -> Result<R, InferenceError>,
     {
-        let instance = PHI4MINI_INSTANCE.get_or_try_init(|| {
-            let config = AppConfig::get();
-            let model_path = config.model_path("onnx");
-            let model_dir = Path::new(&model_path);
-            Self::new(model_dir).map(Mutex::new)
-        })?;
+        let instance = Self::instance()?;
 
         let mut model = instance
             .lock()

@@ -12,9 +12,18 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use lingua::Language;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
+
+/// Shared application state.
+#[derive(Clone)]
+pub struct AppState {
+    /// Default language to use if not specified in the request.
+    pub default_language: Option<Language>,
+}
 
 /// Creates and configures the Axum router with all API routes.
 ///
@@ -24,15 +33,22 @@ use tower_http::trace::TraceLayer;
 /// - CORS middleware (permissive configuration)
 /// - HTTP request tracing middleware
 ///
+/// # Arguments
+///
+/// * `default_language` - Optional default language to use for analysis.
+///
 /// # Returns
 ///
 /// A configured [`Router`] ready to be served.
-pub fn create_app() -> Router {
+pub fn create_app(default_language: Option<Language>) -> Router {
+    let state = Arc::new(AppState { default_language });
+
     Router::new()
         .route("/health", get(handlers::health))
         .route("/api/v1/analyze", post(handlers::analyze_document))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
+        .with_state(state)
 }
 
 /// Starts the HTTP server and listens for incoming requests.
@@ -43,6 +59,7 @@ pub fn create_app() -> Router {
 /// # Arguments
 ///
 /// * `addr` - The socket address to bind to (e.g., `0.0.0.0:3000`).
+/// * `default_language` - Optional default language to use for analysis.
 ///
 /// # Errors
 ///
@@ -50,10 +67,13 @@ pub fn create_app() -> Router {
 /// - The address is already in use
 /// - The address cannot be bound (e.g., permission denied for privileged ports)
 /// - The server encounters a fatal error during operation
-pub async fn start_server(addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn start_server(
+    addr: SocketAddr,
+    default_language: Option<Language>,
+) -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Starting server on {}", addr);
 
-    let app = create_app();
+    let app = create_app(default_language);
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
     tracing::info!("Server listening on http://{}", addr);

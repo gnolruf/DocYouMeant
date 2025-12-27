@@ -24,6 +24,15 @@ pub struct LanguageModelInfo {
     pub is_script_model: bool,
 }
 
+/// A group of languages that share the same OCR model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelGroup {
+    /// The filename of the OCR model for this group.
+    pub model_file: String,
+    /// The list of language names that use this model.
+    pub languages: Vec<String>,
+}
+
 /// Utility struct for language detection and configuration management.
 ///
 /// Provides static methods for:
@@ -33,26 +42,27 @@ pub struct LanguageModelInfo {
 pub struct LangUtils;
 
 impl LangUtils {
-    /// Retrieves the configuration for a specific language.
+    /// Retrieves the information about the model for a specific language.
     ///
-    /// Looks up the language configuration from the JSON config file. If the config file
-    /// cannot be read and the requested language is "english", returns a default English
-    /// configuration as a fallback.
+    /// Looks up the language model info from the JSON model config file using the
+    /// Lingua `Language` enum. If the model config file cannot be read and the
+    /// requested language is English, returns a default English configuration as a fallback.
     ///
     /// # Arguments
     ///
-    /// * `language` - The name of the language to look up (e.g., "english", "chinese").
+    /// * `language` - The Lingua `Language` enum value to look up.
     ///
     /// # Returns
     ///
-    /// * `Some(LanguageConfig)` - The configuration for the requested language if found.
+    /// * `Some(LanguageModelInfo)` - The configuration for the requested language if found.
     /// * `None` - If the language is not supported or not found in the configuration.
-    pub fn get_language_config(language: &str) -> Option<LanguageModelInfo> {
+    pub fn get_language_model_info(language: Language) -> Option<LanguageModelInfo> {
+        let language_str = Self::map_from_lingua_language(language);
         let config = AppConfig::get();
         match Self::get_all_language_configs(false) {
-            Ok(configs) => configs.get(language).cloned(),
+            Ok(configs) => configs.get(&language_str).cloned(),
             Err(_) => {
-                if language == "english" {
+                if language == Language::English {
                     Some(LanguageModelInfo {
                         name: "english".to_string(),
                         model_file: config.model_path("onnx/text_recognition_en.onnx"),
@@ -64,6 +74,23 @@ impl LangUtils {
                 }
             }
         }
+    }
+
+    /// Parses a language string and returns the corresponding Lingua Language enum.
+    ///
+    /// This is useful for converting command-line arguments or configuration strings
+    /// to type-safe Language enum values.
+    ///
+    /// # Arguments
+    ///
+    /// * `language_str` - The language name string to parse (case-insensitive).
+    ///
+    /// # Returns
+    ///
+    /// * `Some(Language)` - The corresponding Lingua `Language` enum variant.
+    /// * `None` - If the language string is not recognized.
+    pub fn parse_language(language_str: &str) -> Option<Language> {
+        Self::map_to_lingua_language(language_str)
     }
 
     /// Retrieves all available language configurations.
@@ -104,6 +131,54 @@ impl LangUtils {
         }
     }
 
+    /// Builds a mapping of OCR model files to their supported languages.
+    ///
+    /// # Arguments
+    ///
+    /// * `script_models_only` - If `true`, only includes script-based models.
+    ///
+    /// # Returns
+    ///
+    /// A `HashMap` where keys are model filenames and values are [`ModelGroup`]
+    /// instances containing the model file and list of supported languages.
+    pub fn get_model_groups(
+        script_models_only: bool,
+    ) -> Result<HashMap<String, ModelGroup>, Box<dyn std::error::Error>> {
+        let configs = Self::get_all_language_configs(script_models_only)?;
+        let mut model_groups: HashMap<String, ModelGroup> = HashMap::new();
+
+        for (lang_name, config) in configs {
+            let entry = model_groups
+                .entry(config.model_file.clone())
+                .or_insert_with(|| ModelGroup {
+                    model_file: config.model_file.clone(),
+                    languages: Vec::new(),
+                });
+
+            entry.languages.push(lang_name);
+        }
+
+        Ok(model_groups)
+    }
+
+    /// Retrieves the model configuration for a specific model file.
+    ///
+    /// # Arguments
+    ///
+    /// * `model_file` - The path to the model file.
+    ///
+    /// # Returns
+    ///
+    /// * `Some(LanguageModelInfo)` - The configuration for the model if found.
+    /// * `None` - If no language uses this model file.
+    pub fn get_model_info_by_file(model_file: &str) -> Option<LanguageModelInfo> {
+        let configs = Self::get_all_language_configs(false).ok()?;
+        configs
+            .values()
+            .find(|c| c.model_file == model_file)
+            .cloned()
+    }
+
     /// Detects the most likely language from a collection of text samples.
     ///
     /// Uses the Lingua library to perform statistical language detection on the combined
@@ -117,15 +192,15 @@ impl LangUtils {
     ///
     /// # Returns
     ///
-    /// * `Some(String)` - The detected language name if detection succeeds.
+    /// * `Some(Language)` - The detected language if detection succeeds.
     /// * `None` - If `texts` or `candidate_languages` is empty.
     ///
     /// # Notes
     ///
     /// - If none of the candidate languages can be mapped to Lingua's supported languages,
-    ///   the first candidate language is returned as a fallback.
+    ///   the first parseable candidate language is returned as a fallback.
     /// - If Lingua cannot confidently detect a language, the first candidate is returned.
-    pub fn detect_language(texts: &[String], candidate_languages: &[String]) -> Option<String> {
+    pub fn detect_language(texts: &[String], candidate_languages: &[String]) -> Option<Language> {
         if texts.is_empty() || candidate_languages.is_empty() {
             return None;
         }
@@ -136,7 +211,9 @@ impl LangUtils {
             .collect();
 
         if lingua_languages.is_empty() {
-            return candidate_languages.first().cloned();
+            return candidate_languages
+                .first()
+                .and_then(|l| Self::map_to_lingua_language(l));
         }
 
         let detector: LanguageDetector = LanguageDetectorBuilder::from_languages(&lingua_languages)
@@ -147,8 +224,7 @@ impl LangUtils {
 
         detector
             .detect_language_of(&combined_text)
-            .map(Self::map_from_lingua_language)
-            .or_else(|| candidate_languages.first().cloned())
+            .or_else(|| lingua_languages.first().copied())
     }
 
     /// Maps an internal language name to a Lingua `Language` enum variant.

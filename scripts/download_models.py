@@ -259,6 +259,11 @@ def main():
         type=str, 
         help="Download models for specific language only (e.g., 'english', 'chinese'). Models without language property are always downloaded."
     )
+    parser.add_argument(
+        "--generate-lang-config",
+        action="store_true",
+        help="Only generate the ocr_lang_models.json config file without downloading any models."
+    )
     args = parser.parse_args()
     
     models_config_path = Path(__file__).parent.parent / "config" / "models.json"
@@ -266,19 +271,24 @@ def main():
     
     models_to_process = filter_models_by_language(models, args.language)
     
+    base_dir = Path(__file__).parent.parent
+    models_dir = base_dir / "models"
+    
+    if args.generate_lang_config:
+        print("Generating language models config only...")
+        generate_ocr_lang_models_config(models_dir, models_to_process)
+        return
+    
     if args.language:
         print(f"Filtering models for language: {args.language}")
         print(f"Models to process: {list(models_to_process.keys())}")
     else:
         print("Processing all models")
     
-    base_dir = Path(__file__).parent.parent
-    
     for model_name, model_info in models_to_process.items():
         processor = get_processor(model_name, model_info, base_dir)
         processor.process()
     
-    models_dir = base_dir / "models"
     generate_ocr_lang_models_config(models_dir, models_to_process)
 
     download_dir = models_dir / "download"

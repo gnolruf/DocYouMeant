@@ -2,10 +2,12 @@ use clap::Parser;
 use docyoumeant::inference::crnn::Crnn;
 use docyoumeant::inference::dbnet::DBNet;
 use docyoumeant::inference::lcnet::{LCNet, LCNetMode};
+use docyoumeant::inference::phi4mini::Phi4MiniInference;
 use docyoumeant::inference::rtdetr::{RtDetr, RtDetrMode};
-use docyoumeant::inference::tasks::question_and_answer_task::QuestionAndAnswerTask;
 use docyoumeant::server;
 use docyoumeant::utils::config::AppConfig;
+use docyoumeant::utils::lang_utils::LangUtils;
+use lingua::Language;
 use std::env;
 
 #[derive(Parser, Debug)]
@@ -31,7 +33,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
-    run_server(args.language).await?;
+    // Parse language from command line argument (None if not provided)
+    let language = args
+        .language
+        .as_ref()
+        .and_then(|s| LangUtils::parse_language(s));
+
+    run_server(language).await?;
 
     Ok(())
 }
@@ -49,15 +57,15 @@ fn setup_ort() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn run_server(language: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_server(language: Option<Language>) -> Result<(), Box<dyn std::error::Error>> {
     let config = AppConfig::get();
     let addr = &config.host_url;
 
     let socket_addr: std::net::SocketAddr = addr.parse()?;
 
-    initialize_models(language.as_deref()).await?;
+    initialize_models(language).await?;
 
-    server::start_server(socket_addr).await?;
+    server::start_server(socket_addr, language).await?;
 
     Ok(())
 }
@@ -70,8 +78,10 @@ async fn run_server(language: Option<String>) -> Result<(), Box<dyn std::error::
 ///
 /// # Arguments
 ///
-/// * `ocr_language` - Optional language code for the OCR model to preload.
-async fn initialize_models(ocr_language: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+/// * `ocr_language` - Optional `Language` enum for the OCR model to preload.
+async fn initialize_models(
+    ocr_language: Option<Language>,
+) -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Preloading models...");
 
     tracing::info!("  Loading DBNet (text detection)...");
@@ -96,11 +106,22 @@ async fn initialize_models(ocr_language: Option<&str>) -> Result<(), Box<dyn std
     RtDetr::get_or_init(RtDetrMode::WirelessTableCell)?;
 
     tracing::info!("  Loading Phi4Mini (language model)...");
-    QuestionAndAnswerTask::get_or_init()?;
+    Phi4MiniInference::init_all()?;
 
     if let Some(language) = ocr_language {
-        tracing::info!("  Loading Crnn ({} text recognition)...", language);
-        let _ = Crnn::new(language)?;
+        let lang_str = LangUtils::map_from_lingua_language(language);
+        tracing::info!("  Loading Crnn ({} text recognition)...", lang_str);
+
+        let model_info = LangUtils::get_language_model_info(language)
+            .ok_or_else(|| format!("Unsupported language: {}", lang_str))?;
+
+        Crnn::get_or_init(model_info.model_file)?;
+    } else {
+        tracing::info!("  Loading CRNN models (OCR)...");
+        let model_groups = LangUtils::get_model_groups(false)?;
+        for (model_file, _) in model_groups {
+            Crnn::get_or_init(model_file)?;
+        }
     }
 
     tracing::info!("All models preloaded successfully.");

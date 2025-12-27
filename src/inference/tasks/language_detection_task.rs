@@ -8,9 +8,8 @@
 //!    2a. Selecting the model group with the highest average confidence score
 //! 3. Using linguistic analysis to narrow down to a specific language
 
-use std::collections::HashMap;
-
 use image::RgbImage;
+use lingua::Language;
 use rand::rng;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
@@ -18,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::document::text_box::TextBox;
 use crate::inference::crnn::Crnn;
 use crate::inference::error::InferenceError;
-use crate::utils::lang_utils::LangUtils;
+use crate::utils::lang_utils::{LangUtils, ModelGroup};
 
 /// Maximum number of text lines to sample for language detection
 const MAX_SAMPLE_LINES: usize = 3;
@@ -29,10 +28,8 @@ const MAX_SAMPLE_LINES: usize = 3;
 /// OCR model was used and the confidence level of the detection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguageDetectionResult {
-    /// The detected language name (e.g., "english", "chinese", "arabic").
-    ///
-    /// This corresponds to language identifiers used by [`LangUtils`].
-    pub language: String,
+    /// The detected language as a Lingua `Language` enum.
+    pub language: Language,
     /// The filename of the OCR model that produced the best results.
     ///
     /// This may be empty for text-based detection where no OCR model is used.
@@ -50,7 +47,7 @@ impl LanguageDetectionResult {
     ///
     /// # Arguments
     ///
-    /// * `language` - The detected language name.
+    /// * `language` - The detected language as a Lingua `Language` enum.
     /// * `model_file` - The OCR model filename used for detection.
     /// * `confidence` - The confidence score (0.0 to 1.0).
     ///
@@ -58,26 +55,25 @@ impl LanguageDetectionResult {
     ///
     /// A new `LanguageDetectionResult` instance.
     #[must_use]
-    pub fn new(language: String, model_file: String, confidence: f32) -> Self {
+    pub fn new(language: Language, model_file: String, confidence: f32) -> Self {
         Self {
             language,
             model_file,
             confidence,
         }
     }
-}
 
-/// A group of languages that share the same OCR model.
-///
-/// Many languages share a common script (e.g., Latin alphabet), allowing
-/// them to use the same OCR model. This struct groups languages by their
-/// associated model file for efficient detection.
-#[derive(Debug, Clone)]
-struct ModelGroup {
-    /// The filename of the OCR model for this group.
-    model_file: String,
-    /// The list of language names that use this model.
-    languages: Vec<String>,
+    /// Gets the detected language name as a lowercase string.
+    ///
+    /// This is useful for logging or when a string representation is needed.
+    ///
+    /// # Returns
+    ///
+    /// A lowercase string representation of the language (e.g., "english", "chinese").
+    #[must_use]
+    pub fn language_name(&self) -> String {
+        LangUtils::map_from_lingua_language(self.language)
+    }
 }
 
 /// Task handler for automatic language detection in documents.
@@ -89,44 +85,6 @@ struct ModelGroup {
 pub struct LanguageDetectionTask;
 
 impl LanguageDetectionTask {
-    /// Builds a mapping of OCR model files to their supported languages.
-    ///
-    /// Loads all available language configurations and groups them by the
-    /// OCR model file they use.
-    ///
-    /// # Returns
-    ///
-    /// A `HashMap` where keys are model filenames and values are [`ModelGroup`]
-    /// instances containing the model file and list of supported languages.
-    ///
-    /// # Errors
-    ///
-    /// Returns an [`InferenceError::PreprocessingError`] if the language
-    /// configuration files cannot be loaded.
-    fn build_model_groups() -> Result<HashMap<String, ModelGroup>, InferenceError> {
-        let configs = LangUtils::get_all_language_configs(true).map_err(|e| {
-            InferenceError::PreprocessingError {
-                operation: "load language configs".to_string(),
-                message: e.to_string(),
-            }
-        })?;
-
-        let mut model_groups: HashMap<String, ModelGroup> = HashMap::new();
-
-        for (lang_name, config) in configs {
-            let entry = model_groups
-                .entry(config.model_file.clone())
-                .or_insert_with(|| ModelGroup {
-                    model_file: config.model_file.clone(),
-                    languages: Vec::new(),
-                });
-
-            entry.languages.push(lang_name);
-        }
-
-        Ok(model_groups)
-    }
-
     /// Samples text lines for language detection.
     ///
     /// Randomly selects up to [`MAX_SAMPLE_LINES`] text regions to use for
@@ -174,7 +132,7 @@ impl LanguageDetectionTask {
     ///
     /// # Arguments
     ///
-    /// * `language` - The language identifier to use for loading the OCR model.
+    /// * `model_file` - The model file to use for loading the OCR model.
     /// * `samples` - The sampled text box and image pairs to process.
     ///
     /// # Returns
@@ -188,22 +146,25 @@ impl LanguageDetectionTask {
     /// Returns an [`InferenceError`] if the OCR model fails to load or
     /// process any of the samples.
     fn process_with_model(
-        language: &str,
+        model_file: &str,
         samples: &[(&TextBox, &RgbImage)],
     ) -> Result<(f32, Vec<String>), InferenceError> {
-        let mut crnn = Crnn::new(language)?;
+        let images: Vec<&RgbImage> = samples.iter().map(|(_, img)| *img).collect();
+        let mut text_boxes: Vec<TextBox> = samples.iter().map(|(tb, _)| (*tb).clone()).collect();
+
+        Crnn::with_instance(model_file.to_string(), |crnn| {
+            let images_owned: Vec<RgbImage> = images.iter().map(|img| (*img).clone()).collect();
+            crnn.get_texts(&images_owned, &mut text_boxes)
+        })?;
 
         let mut total_score = 0.0;
         let mut recognized_texts = Vec::new();
 
-        for (text_box, image) in samples {
-            let mut text_box_clone = (*text_box).clone();
-            let _ = crnn.get_text(image, &mut text_box_clone)?;
-
-            if let Some(text) = &text_box_clone.text {
+        for text_box in &text_boxes {
+            if let Some(text) = &text_box.text {
                 recognized_texts.push(text.clone());
             }
-            total_score += text_box_clone.text_score;
+            total_score += text_box.text_score;
         }
 
         let avg_score = if samples.is_empty() {
@@ -252,7 +213,11 @@ impl LanguageDetectionTask {
             });
         }
 
-        let model_groups = Self::build_model_groups()?;
+        let model_groups =
+            LangUtils::get_model_groups(true).map_err(|e| InferenceError::PreprocessingError {
+                operation: "load models".to_string(),
+                message: e.to_string(),
+            })?;
 
         if model_groups.is_empty() {
             return Err(InferenceError::PreprocessingError {
@@ -273,14 +238,7 @@ impl LanguageDetectionTask {
         let mut best_result: Option<(f32, ModelGroup, Vec<String>)> = None;
 
         for (_, model_group) in model_groups {
-            let test_language = model_group.languages.first().ok_or_else(|| {
-                InferenceError::PreprocessingError {
-                    operation: "get test language".to_string(),
-                    message: "Model group has no languages".to_string(),
-                }
-            })?;
-
-            match Self::process_with_model(test_language, &samples) {
+            match Self::process_with_model(&model_group.model_file, &samples) {
                 Ok((score, texts)) => {
                     let is_better = best_result
                         .as_ref()
@@ -317,7 +275,13 @@ impl LanguageDetectionTask {
         }
 
         let language = LangUtils::detect_language(&recognized_texts, &candidate_languages)
-            .unwrap_or_else(|| best_group.languages.first().cloned().unwrap_or_default());
+            .unwrap_or_else(|| {
+                best_group
+                    .languages
+                    .first()
+                    .and_then(|l| LangUtils::parse_language(l))
+                    .unwrap_or(Language::English)
+            });
 
         Ok(LanguageDetectionResult::new(
             language,
@@ -363,8 +327,8 @@ impl LanguageDetectionTask {
 
         let candidate_languages: Vec<String> = configs.keys().cloned().collect();
 
-        let language = LangUtils::detect_language(texts, &candidate_languages)
-            .unwrap_or_else(|| "english".to_string());
+        let language =
+            LangUtils::detect_language(texts, &candidate_languages).unwrap_or(Language::English);
 
         Ok(LanguageDetectionResult::new(language, String::new(), 1.0))
     }

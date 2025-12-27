@@ -11,9 +11,7 @@
 use geo::Coord;
 use image::RgbImage;
 use ndarray::Array2;
-use once_cell::sync::OnceCell;
 use ort::{inputs, session::Session, value::Value};
-use std::sync::Mutex;
 
 use crate::document::bounds::Bounds;
 use crate::document::table::TableCell;
@@ -22,12 +20,7 @@ use crate::inference::error::InferenceError;
 use crate::utils::config::AppConfig;
 use crate::utils::{box_utils, image_utils};
 
-/// Singleton instance for layout detection model.
-static LAYOUT_DETECTION_INSTANCE: OnceCell<Mutex<RtDetr>> = OnceCell::new();
-/// Singleton instance for wired (bordered) table cell detection model.
-static WIRED_TABLE_CELL_DETECTION_INSTANCE: OnceCell<Mutex<RtDetr>> = OnceCell::new();
-/// Singleton instance for wireless (borderless) table cell detection model.
-static WIRELESS_TABLE_CELL_DETECTION_INSTANCE: OnceCell<Mutex<RtDetr>> = OnceCell::new();
+use crate::impl_static_keyed_singleton;
 
 /// Operating mode for the RT-DETR detector.
 ///
@@ -84,6 +77,16 @@ pub struct RtDetr {
     scale_y: f32,
     mode: RtDetrMode,
 }
+
+impl_static_keyed_singleton!(
+    model: RtDetr,
+    key_type: RtDetrMode,
+    variants: {
+        Layout => LAYOUT_DETECTION_INSTANCE,
+        WiredTableCell => WIRED_TABLE_CELL_DETECTION_INSTANCE,
+        WirelessTableCell => WIRELESS_TABLE_CELL_DETECTION_INSTANCE,
+    }
+);
 
 impl RtDetr {
     /// Path to the layout detection model.
@@ -164,51 +167,6 @@ impl RtDetr {
             scale_y: 1.0,
             mode,
         })
-    }
-
-    /// Pre-initializes the RT-DETR singleton for the specified mode.
-    ///
-    /// Call this method during application startup to eagerly load models
-    /// rather than waiting for the first detection request.
-    ///
-    /// # Arguments
-    ///
-    /// * `mode` - The detection mode to initialize
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` - Model successfully initialized
-    /// * `Err(InferenceError)` - If initialization fails
-    pub fn get_or_init(mode: RtDetrMode) -> Result<(), InferenceError> {
-        match mode {
-            RtDetrMode::Layout => {
-                LAYOUT_DETECTION_INSTANCE
-                    .get_or_try_init(|| Self::new(RtDetrMode::Layout).map(Mutex::new))?;
-            }
-            RtDetrMode::WiredTableCell => {
-                WIRED_TABLE_CELL_DETECTION_INSTANCE
-                    .get_or_try_init(|| Self::new(RtDetrMode::WiredTableCell).map(Mutex::new))?;
-            }
-            RtDetrMode::WirelessTableCell => {
-                WIRELESS_TABLE_CELL_DETECTION_INSTANCE
-                    .get_or_try_init(|| Self::new(RtDetrMode::WirelessTableCell).map(Mutex::new))?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Returns a reference to the singleton instance for the specified mode.
-    ///
-    /// Initializes the instance if it hasn't been created yet.
-    fn instance(mode: RtDetrMode) -> Result<&'static Mutex<RtDetr>, InferenceError> {
-        match mode {
-            RtDetrMode::Layout => LAYOUT_DETECTION_INSTANCE
-                .get_or_try_init(|| Self::new(RtDetrMode::Layout).map(Mutex::new)),
-            RtDetrMode::WiredTableCell => WIRED_TABLE_CELL_DETECTION_INSTANCE
-                .get_or_try_init(|| Self::new(RtDetrMode::WiredTableCell).map(Mutex::new)),
-            RtDetrMode::WirelessTableCell => WIRELESS_TABLE_CELL_DETECTION_INSTANCE
-                .get_or_try_init(|| Self::new(RtDetrMode::WirelessTableCell).map(Mutex::new)),
-        }
     }
 
     /// Preprocesses an image for detection.
