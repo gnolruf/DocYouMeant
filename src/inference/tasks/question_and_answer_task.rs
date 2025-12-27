@@ -64,22 +64,6 @@ impl QuestionAndAnswerResult {
 pub struct QuestionAndAnswerTask;
 
 impl QuestionAndAnswerTask {
-    /// Initializes the underlying model if not already loaded.
-    ///
-    /// This method should be called at application startup to preload the
-    /// language model, avoiding latency on the first question. The model
-    /// is cached globally and reused for subsequent calls.
-    ///
-    /// # Errors
-    ///
-    /// Returns an [`InferenceError`] if:
-    /// - The model files cannot be found or loaded
-    /// - The tokenizer fails to initialize
-    /// - There is insufficient memory to load the model
-    pub fn get_or_init() -> Result<(), InferenceError> {
-        Phi4MiniInference::init_all()
-    }
-
     /// Answers a question based on the provided document context.
     ///
     /// This method sends the context and question to the model,
