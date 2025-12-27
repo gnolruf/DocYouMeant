@@ -2,8 +2,8 @@ use clap::Parser;
 use docyoumeant::inference::crnn::Crnn;
 use docyoumeant::inference::dbnet::DBNet;
 use docyoumeant::inference::lcnet::{LCNet, LCNetMode};
+use docyoumeant::inference::phi4mini::Phi4MiniInference;
 use docyoumeant::inference::rtdetr::{RtDetr, RtDetrMode};
-use docyoumeant::inference::tasks::question_and_answer_task::QuestionAndAnswerTask;
 use docyoumeant::server;
 use docyoumeant::utils::config::AppConfig;
 use docyoumeant::utils::lang_utils::LangUtils;
@@ -106,7 +106,7 @@ async fn initialize_models(
     RtDetr::get_or_init(RtDetrMode::WirelessTableCell)?;
 
     tracing::info!("  Loading Phi4Mini (language model)...");
-    QuestionAndAnswerTask::get_or_init()?;
+    Phi4MiniInference::init_all()?;
 
     if let Some(language) = ocr_language {
         let lang_str = LangUtils::map_from_lingua_language(language);
