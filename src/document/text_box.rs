@@ -103,22 +103,36 @@ impl Orientation {
     /// # Returns
     ///
     /// Returns `Some(Orientation)` with the most common orientation, or `None`
-    /// if the input slice is empty. If there's a tie, one of the tied
-    /// orientations is returned (not guaranteed which one).
+    /// if the input slice is empty. If there's a tie, the orientation with the
+    /// lower variant index is returned (0° before 90° before 180° before 270°).
+    #[must_use]
     pub fn most_common(orientations: &[Orientation]) -> Option<Orientation> {
         if orientations.is_empty() {
             return None;
         }
 
-        let mut counts = std::collections::HashMap::new();
+        let mut counts = [0u32; 4];
         for &orientation in orientations {
-            *counts.entry(orientation).or_insert(0) += 1;
+            let idx = match orientation {
+                Orientation::Oriented0 => 0,
+                Orientation::Oriented90 => 1,
+                Orientation::Oriented180 => 2,
+                Orientation::Oriented270 => 3,
+            };
+            counts[idx] += 1;
         }
 
-        counts
-            .into_iter()
-            .max_by_key(|&(_, count)| count)
-            .map(|(orientation, _)| orientation)
+        let (max_idx, _) = counts
+            .iter()
+            .enumerate()
+            .max_by_key(|&(_, &count)| count)?;
+
+        Some(match max_idx {
+            0 => Orientation::Oriented0,
+            1 => Orientation::Oriented90,
+            2 => Orientation::Oriented180,
+            _ => Orientation::Oriented270,
+        })
     }
 }
 

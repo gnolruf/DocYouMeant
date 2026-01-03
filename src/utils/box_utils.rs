@@ -1,5 +1,8 @@
 //! Utility functions for bounding box operations.
 
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
+
 use crate::document::bounds::Bounds;
 use crate::utils::error::BoxError;
 use geo::{Area, BooleanOps, Coord, LineString, Polygon};
@@ -350,49 +353,31 @@ pub fn graph_based_reading_order(bounds_list: &[Bounds]) -> Vec<usize> {
         }
     }
 
-    // Topological sort using Kahn's algorithm
-    let mut queue: Vec<usize> = Vec::with_capacity(n);
+    let mut heap: BinaryHeap<Reverse<(i32, i32, usize)>> = BinaryHeap::with_capacity(n);
     let mut result: Vec<usize> = Vec::with_capacity(n);
 
     for (i, &deg) in in_degree.iter().enumerate() {
         if deg == 0 {
-            queue.push(i);
+            let bounds = &bounds_list[i];
+            heap.push(Reverse((bounds.center_y(), bounds.center_x(), i)));
         }
     }
 
-    queue.sort_by(|&a, &b| {
-        let bounds_a = &bounds_list[a];
-        let bounds_b = &bounds_list[b];
-
-        match bounds_a.center_y().cmp(&bounds_b.center_y()) {
-            std::cmp::Ordering::Equal => bounds_a.center_x().cmp(&bounds_b.center_x()),
-            other => other,
-        }
-    });
-
-    while let Some(node) = queue.pop() {
+    while let Some(Reverse((_, _, node))) = heap.pop() {
         result.push(node);
 
         for &neighbor in &graph[node] {
             in_degree[neighbor] -= 1;
             if in_degree[neighbor] == 0 {
-                queue.push(neighbor);
-
-                queue.sort_by(|&a, &b| {
-                    let bounds_a = &bounds_list[a];
-                    let bounds_b = &bounds_list[b];
-
-                    match bounds_a.center_y().cmp(&bounds_b.center_y()) {
-                        std::cmp::Ordering::Equal => bounds_a.center_x().cmp(&bounds_b.center_x()),
-                        other => other,
-                    }
-                });
+                let bounds = &bounds_list[neighbor];
+                heap.push(Reverse((bounds.center_y(), bounds.center_x(), neighbor)));
             }
         }
     }
 
     if result.len() < n {
-        let mut remaining: Vec<usize> = (0..n).filter(|i| !result.contains(i)).collect();
+        let in_result: std::collections::HashSet<usize> = result.iter().copied().collect();
+        let mut remaining: Vec<usize> = (0..n).filter(|i| !in_result.contains(i)).collect();
         remaining.sort_by(|&a, &b| {
             let bounds_a = &bounds_list[a];
             let bounds_b = &bounds_list[b];

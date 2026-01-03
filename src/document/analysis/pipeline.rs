@@ -114,9 +114,9 @@ impl AnalysisPipeline {
     /// A new `AnalysisPipeline` instance configured for the specified document type
     /// and processing mode.
     #[must_use]
-    pub fn new(document_type: DocumentType, process_id: &str) -> Self {
+    pub fn new(document_type: &DocumentType, process_id: &str) -> Self {
         Self {
-            document_type,
+            document_type: document_type.clone(),
             process_mode: ProcessMode::from(process_id),
         }
     }
@@ -157,25 +157,23 @@ impl AnalysisPipeline {
                             self.process_pdf_with_embedded_text(image, page, language_cache)?;
 
                         page.orientation = Some(orientation);
-                        page.layout_boxes.clone_from(&layout_boxes);
-                        page.text_lines.clone_from(&text_lines);
                         page.detected_language =
                             Some(LangUtils::map_from_lingua_language(language));
                         page.tables = tables;
 
-                        Self::update_page_text(page);
-
                         let regions =
                             LayoutBox::build_regions(page.page_number, &layout_boxes, &text_lines);
+                        page.layout_boxes = layout_boxes;
+                        page.text_lines = text_lines;
                         page.regions = regions;
+
+                        Self::update_page_text(page);
                     } else {
                         debug!("Processing PDF as image");
                         let (text_lines, words, layout_boxes, tables, orientation, language) =
                             self.process_image_document(image, page.page_number, language_cache)?;
 
                         page.orientation = Some(orientation);
-                        page.layout_boxes.clone_from(&layout_boxes);
-                        page.text_lines.clone_from(&text_lines);
                         page.detected_language =
                             Some(LangUtils::map_from_lingua_language(language));
                         page.tables = tables;
@@ -183,11 +181,13 @@ impl AnalysisPipeline {
                             page.words = words;
                         }
 
-                        Self::update_page_text(page);
-
                         let regions =
                             LayoutBox::build_regions(page.page_number, &layout_boxes, &text_lines);
+                        page.layout_boxes = layout_boxes;
+                        page.text_lines = text_lines;
                         page.regions = regions;
+
+                        Self::update_page_text(page);
                     }
                 }
 
@@ -203,19 +203,19 @@ impl AnalysisPipeline {
                         self.process_image_document(image, page.page_number, language_cache)?;
 
                     page.orientation = Some(orientation);
-                    page.layout_boxes.clone_from(&layout_boxes);
-                    page.text_lines.clone_from(&text_lines);
                     page.detected_language = Some(LangUtils::map_from_lingua_language(language));
                     page.tables = tables;
                     if !words.is_empty() {
                         page.words = words;
                     }
 
-                    Self::update_page_text(page);
-
                     let regions =
                         LayoutBox::build_regions(page.page_number, &layout_boxes, &text_lines);
+                    page.layout_boxes = layout_boxes;
+                    page.text_lines = text_lines;
                     page.regions = regions;
+
+                    Self::update_page_text(page);
                 }
 
                 if self.process_mode != ProcessMode::Read {
@@ -912,7 +912,7 @@ impl AnalysisPipeline {
         for page in pages {
             self.process_page(page, questions, &mut language_cache)?;
 
-            all_qa_results.extend(page.question_answers.clone());
+            all_qa_results.append(&mut page.question_answers);
         }
 
         Ok(all_qa_results)

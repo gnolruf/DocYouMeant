@@ -26,6 +26,7 @@ use crate::utils::error::ImageError;
 ///
 /// A new [`RgbImage`] with the original image centered and surrounded by padding.
 /// If all padding values are zero, returns a clone of the original image.
+#[must_use]
 pub fn add_image_padding(
     image: &RgbImage,
     padding_top: u32,
@@ -45,18 +46,8 @@ pub fn add_image_padding(
     let new_width = original_width + padding_left + padding_right;
     let new_height = original_height + padding_top + padding_bottom;
 
-    let mut padded_img: RgbImage = ImageBuffer::new(new_width, new_height);
-
-    for pixel in padded_img.pixels_mut() {
-        *pixel = color;
-    }
-
-    for y in 0..original_height {
-        for x in 0..original_width {
-            let src_pixel = image.get_pixel(x, y);
-            padded_img.put_pixel(x + padding_left, y + padding_top, *src_pixel);
-        }
-    }
+    let mut padded_img: RgbImage = ImageBuffer::from_pixel(new_width, new_height, color);
+    imageops::overlay(&mut padded_img, image, padding_left.into(), padding_top.into());
 
     padded_img
 }

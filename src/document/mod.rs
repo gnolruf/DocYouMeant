@@ -144,8 +144,7 @@ impl Document {
         language: Option<Language>,
     ) -> Result<(), DocumentError> {
         self.process_id = process_id.to_string();
-        let doc_type = self.doc_type.clone();
-        let pipeline = AnalysisPipeline::new(doc_type, &self.process_id);
+        let pipeline = AnalysisPipeline::new(&self.doc_type, &self.process_id);
 
         let content = match self.content_mut() {
             Some(content) => content,
