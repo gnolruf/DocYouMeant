@@ -130,24 +130,28 @@ impl TableCell {
 
     /// Returns the minimum x coordinate (left edge) of the cell.
     #[inline]
+    #[must_use]
     pub fn min_x(&self) -> i32 {
         self.bounds.left()
     }
 
     /// Returns the maximum x coordinate (right edge) of the cell.
     #[inline]
+    #[must_use]
     pub fn max_x(&self) -> i32 {
         self.bounds.right()
     }
 
     /// Returns the minimum y coordinate (top edge) of the cell.
     #[inline]
+    #[must_use]
     pub fn min_y(&self) -> i32 {
         self.bounds.top()
     }
 
     /// Returns the maximum y coordinate (bottom edge) of the cell.
     #[inline]
+    #[must_use]
     pub fn max_y(&self) -> i32 {
         self.bounds.bottom()
     }

@@ -92,6 +92,7 @@ impl LayoutClass {
     /// Returns `true` if this class is an applicable region class.
     ///
     /// Returns `false` for all other layout classes.
+    #[must_use]
     pub fn is_region(&self) -> bool {
         matches!(
             self,
@@ -211,6 +212,7 @@ impl LayoutBox {
     /// 2. Mark those text boxes as used (preventing reuse).
     /// 3. Combine the text and bounds of overlapping text boxes.
     /// 4. Create a new `LayoutBox` with the combined content.
+    #[must_use]
     pub fn build_regions(
         page_number: usize,
         layout_boxes: &[LayoutBox],

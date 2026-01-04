@@ -44,6 +44,7 @@ impl AppConfig {
     /// # Returns
     ///
     /// Returns the parsed `AppConfig` or a `ConfigError` if loading fails.
+    #[must_use]
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
         let content = fs::read_to_string(path)?;
         let config: AppConfig = serde_json::from_str(&content)?;
@@ -57,6 +58,7 @@ impl AppConfig {
     /// # Returns
     ///
     /// Returns the parsed `AppConfig` or a `ConfigError` if loading fails.
+    #[must_use]
     pub fn load_default() -> Result<Self, ConfigError> {
         Self::from_file(DEFAULT_CONFIG_PATH)
     }
@@ -80,6 +82,7 @@ impl AppConfig {
     /// # Returns
     ///
     /// Returns a reference to the global configuration.
+    #[must_use]
     pub fn get() -> &'static Self {
         CONFIG_INSTANCE.get_or_init(Self::default)
     }
@@ -89,6 +92,7 @@ impl AppConfig {
     /// # Returns
     ///
     /// Returns an `AppConfig` with sensible default values.
+    #[must_use]
     pub fn default_config() -> Self {
         Self {
             max_file_size: 1024 * 1024 * 1024, // 1 GB
@@ -107,6 +111,7 @@ impl AppConfig {
     /// # Returns
     ///
     /// Returns the full path to the model file.
+    #[must_use]
     pub fn model_path(&self, relative_path: &str) -> String {
         format!("{}/{}", self.model_directory, relative_path)
     }

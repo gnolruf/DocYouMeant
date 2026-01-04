@@ -56,6 +56,7 @@ impl LangUtils {
     ///
     /// * `Some(LanguageModelInfo)` - The configuration for the requested language if found.
     /// * `None` - If the language is not supported or not found in the configuration.
+    #[must_use]
     pub fn get_language_model_info(language: Language) -> Option<LanguageModelInfo> {
         let language_str = Self::map_from_lingua_language(language);
         let config = AppConfig::get();
@@ -89,6 +90,7 @@ impl LangUtils {
     ///
     /// * `Some(Language)` - The corresponding Lingua `Language` enum variant.
     /// * `None` - If the language string is not recognized.
+    #[must_use]
     pub fn parse_language(language_str: &str) -> Option<Language> {
         Self::map_to_lingua_language(language_str)
     }
@@ -171,6 +173,7 @@ impl LangUtils {
     ///
     /// * `Some(LanguageModelInfo)` - The configuration for the model if found.
     /// * `None` - If no language uses this model file.
+    #[must_use]
     pub fn get_model_info_by_file(model_file: &str) -> Option<LanguageModelInfo> {
         let configs = Self::get_all_language_configs(false).ok()?;
         configs
@@ -200,6 +203,7 @@ impl LangUtils {
     /// - If none of the candidate languages can be mapped to Lingua's supported languages,
     ///   the first parseable candidate language is returned as a fallback.
     /// - If Lingua cannot confidently detect a language, the first candidate is returned.
+    #[must_use]
     pub fn detect_language(texts: &[String], candidate_languages: &[String]) -> Option<Language> {
         if texts.is_empty() || candidate_languages.is_empty() {
             return None;
@@ -240,6 +244,7 @@ impl LangUtils {
     ///
     /// * `Some(Language)` - The corresponding Lingua `Language` enum variant.
     /// * `None` - If the language name is not recognized or not supported by Lingua.
+    #[must_use]
     pub fn map_to_lingua_language(language: &str) -> Option<Language> {
         match language.to_lowercase().as_str() {
             // A
@@ -362,6 +367,7 @@ impl LangUtils {
     ///
     /// This function handles all Lingua language variants. The returned string matches
     /// the keys used in the language configuration files.
+    #[must_use]
     pub fn map_from_lingua_language(language: Language) -> String {
         match language {
             // A

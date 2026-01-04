@@ -206,6 +206,7 @@ impl AnalysisResult {
 /// - Aggregated layout regions from all pages
 /// - Aggregated tables from all pages
 /// - Metadata including document type, page count, and detected language
+#[must_use]
 pub fn to_analyze_result(
     doc_type: &DocumentType,
     content: &dyn DocumentContent,

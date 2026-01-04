@@ -27,6 +27,7 @@ use geo_clipper::Clipper;
 ///
 /// Returns 0.0 if either polygon has zero area.
 #[inline]
+#[must_use]
 pub fn calculate_iou(points1: &[Coord<i32>], points2: &[Coord<i32>]) -> f32 {
     let poly1 = Polygon::new(
         LineString::from_iter(points1.iter().map(|c| Coord {
@@ -77,6 +78,7 @@ pub fn calculate_iou(points1: &[Coord<i32>], points2: &[Coord<i32>]) -> f32 {
 /// A value between 0.0 and 1.0 representing the fraction of `poly1`'s area
 /// that overlaps with `poly2`. Returns 0.0 if `poly1` has zero area.
 #[inline]
+#[must_use]
 pub fn calculate_overlap(poly1: &[Coord<i32>], poly2: &[Coord<i32>]) -> f32 {
     let polygon1 = Polygon::new(
         LineString::from_iter(poly1.iter().map(|c| Coord {
@@ -134,6 +136,7 @@ pub fn calculate_overlap(poly1: &[Coord<i32>], poly2: &[Coord<i32>]) -> f32 {
 /// # Note
 ///
 /// Only boxes with the same class label are compared for suppression.
+#[must_use]
 pub fn apply_nms(
     mut detections: Vec<([Coord<i32>; 4], usize, f32)>,
     nms_threshold: f32,
@@ -190,6 +193,7 @@ pub fn apply_nms(
 /// The expansion distance is calculated as: `area * unclip_ratio / perimeter`
 ///
 /// This ensures that boxes with different aspect ratios expand proportionally.
+#[must_use]
 pub fn unclip_box(
     box_points: &[Coord<i32>; 4],
     unclip_ratio: f32,
@@ -260,6 +264,7 @@ pub fn unclip_box(
 /// 1. Sort points by x-coordinate
 /// 2. Assign left two points (index1, index4) based on y-coordinate
 /// 3. Assign right two points (index2, index3) based on y-coordinate
+#[must_use]
 pub fn get_min_boxes(corner_points: &[Coord<i32>; 4]) -> ([Coord<i32>; 4], f32) {
     let dx1 = (corner_points[1].x - corner_points[0].x) as f32;
     let dy1 = (corner_points[1].y - corner_points[0].y) as f32;
@@ -330,6 +335,7 @@ pub fn get_min_boxes(corner_points: &[Coord<i32>; 4]) -> ([Coord<i32>; 4], f32) 
 /// # Note
 ///
 /// Returns 1-indexed positions to match common document labeling conventions.
+#[must_use]
 pub fn graph_based_reading_order(bounds_list: &[Bounds]) -> Vec<usize> {
     if bounds_list.is_empty() {
         return Vec::new();

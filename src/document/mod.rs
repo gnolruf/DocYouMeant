@@ -96,6 +96,7 @@ impl Document {
     }
 
     /// Returns a reference to the document type.
+    #[must_use]
     pub fn doc_type(&self) -> &DocumentType {
         &self.doc_type
     }
@@ -108,6 +109,7 @@ impl Document {
     /// # Returns
     ///
     /// Returns `Some(&dyn DocumentContent)` if content is loaded, `None` otherwise.
+    #[must_use]
     pub fn content(&self) -> Option<&dyn DocumentContent> {
         self.content.as_deref()
     }

@@ -81,6 +81,7 @@ impl DocumentType {
     /// # Returns
     ///
     /// A vector of tuples containing `(extension, DocumentType)` pairs.
+    #[must_use]
     pub fn supported_types() -> Vec<(&'static str, DocumentType)> {
         vec![
             ("txt", DocumentType::Text),
@@ -104,6 +105,7 @@ impl DocumentType {
     /// # Returns
     ///
     /// The canonical extension string without a leading dot.
+    #[must_use]
     pub fn canonical_extension(&self) -> &'static str {
         match self {
             DocumentType::Text => "txt",
@@ -325,6 +327,7 @@ impl PageContent {
     /// Regions are populated during layout analysis and represent
     /// meaningful areas of the page (text blocks, figures, tables, etc.).
     #[inline]
+    #[must_use]
     pub fn has_regions(&self) -> bool {
         !self.regions.is_empty()
     }
@@ -335,12 +338,14 @@ impl PageContent {
     /// (from PDF text layer or OCR) and the page orientation has been
     /// determined. This is used to decide if OCR processing is needed.
     #[inline]
+    #[must_use]
     pub fn has_embedded_text_data(&self) -> bool {
         !self.words.is_empty() && self.orientation.is_some()
     }
 
     /// Returns `true` if this page contains detected tables.
     #[inline]
+    #[must_use]
     pub fn has_tables(&self) -> bool {
         !self.tables.is_empty()
     }
