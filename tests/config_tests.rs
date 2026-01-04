@@ -52,9 +52,9 @@ fn test_default_config() {
 fn test_serialize_config() {
     let config = AppConfig {
         max_file_size: 1000,
-        rt_cache_directory: "test/cache".to_string(),
-        model_directory: "test/models".to_string(),
-        host_url: "localhost:9000".to_string(),
+        rt_cache_directory: "test/cache".into(),
+        model_directory: "test/models".into(),
+        host_url: "localhost:9000".into(),
     };
 
     let json = serde_json::to_string(&config).unwrap();

@@ -47,7 +47,12 @@ pub fn add_image_padding(
     let new_height = original_height + padding_top + padding_bottom;
 
     let mut padded_img: RgbImage = ImageBuffer::from_pixel(new_width, new_height, color);
-    imageops::overlay(&mut padded_img, image, padding_left.into(), padding_top.into());
+    imageops::overlay(
+        &mut padded_img,
+        image,
+        padding_left.into(),
+        padding_top.into(),
+    );
 
     padded_img
 }

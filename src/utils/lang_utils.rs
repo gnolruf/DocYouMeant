@@ -1,5 +1,6 @@
 //! Utility functions for language configurations.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
 
@@ -61,7 +62,7 @@ impl LangUtils {
         let language_str = Self::map_from_lingua_language(language);
         let config = AppConfig::get();
         match Self::get_all_language_configs(false) {
-            Ok(configs) => configs.get(&language_str).cloned(),
+            Ok(configs) => configs.get(language_str.as_ref()).cloned(),
             Err(_) => {
                 if language == Language::English {
                     Some(LanguageModelInfo {
@@ -361,114 +362,116 @@ impl LangUtils {
     ///
     /// # Returns
     ///
-    /// A lowercase string representation of the language (e.g., `Language::English` → `"english"`).
+    /// A [`Cow<'static, str>`] containing a lowercase string representation of the language
+    /// (e.g., `Language::English` → `"english"`). Returns a borrowed static string to avoid
+    /// allocations.
     ///
     /// # Note
     ///
     /// This function handles all Lingua language variants. The returned string matches
     /// the keys used in the language configuration files.
     #[must_use]
-    pub fn map_from_lingua_language(language: Language) -> String {
+    pub fn map_from_lingua_language(language: Language) -> Cow<'static, str> {
         match language {
             // A
-            Language::Afrikaans => "afrikaans".to_string(),
-            Language::Albanian => "albanian".to_string(),
-            Language::Arabic => "arabic".to_string(),
-            Language::Armenian => "armenian".to_string(),
-            Language::Azerbaijani => "azerbaijani".to_string(),
+            Language::Afrikaans => "afrikaans".into(),
+            Language::Albanian => "albanian".into(),
+            Language::Arabic => "arabic".into(),
+            Language::Armenian => "armenian".into(),
+            Language::Azerbaijani => "azerbaijani".into(),
             // B
-            Language::Basque => "basque".to_string(),
-            Language::Belarusian => "belarusian".to_string(),
-            Language::Bengali => "bengali".to_string(),
-            Language::Bokmal => "bokmal".to_string(),
-            Language::Bosnian => "bosnian".to_string(),
-            Language::Bulgarian => "bulgarian".to_string(),
+            Language::Basque => "basque".into(),
+            Language::Belarusian => "belarusian".into(),
+            Language::Bengali => "bengali".into(),
+            Language::Bokmal => "bokmal".into(),
+            Language::Bosnian => "bosnian".into(),
+            Language::Bulgarian => "bulgarian".into(),
             // C
-            Language::Catalan => "catalan".to_string(),
-            Language::Chinese => "chinese".to_string(),
-            Language::Croatian => "croatian".to_string(),
-            Language::Czech => "czech".to_string(),
+            Language::Catalan => "catalan".into(),
+            Language::Chinese => "chinese".into(),
+            Language::Croatian => "croatian".into(),
+            Language::Czech => "czech".into(),
             // D
-            Language::Danish => "danish".to_string(),
-            Language::Dutch => "dutch".to_string(),
+            Language::Danish => "danish".into(),
+            Language::Dutch => "dutch".into(),
             // E
-            Language::English => "english".to_string(),
-            Language::Esperanto => "esperanto".to_string(),
-            Language::Estonian => "estonian".to_string(),
+            Language::English => "english".into(),
+            Language::Esperanto => "esperanto".into(),
+            Language::Estonian => "estonian".into(),
             // F
-            Language::Finnish => "finnish".to_string(),
-            Language::French => "french".to_string(),
+            Language::Finnish => "finnish".into(),
+            Language::French => "french".into(),
             // G
-            Language::Ganda => "ganda".to_string(),
-            Language::Georgian => "georgian".to_string(),
-            Language::German => "german".to_string(),
-            Language::Greek => "greek".to_string(),
-            Language::Gujarati => "gujarati".to_string(),
+            Language::Ganda => "ganda".into(),
+            Language::Georgian => "georgian".into(),
+            Language::German => "german".into(),
+            Language::Greek => "greek".into(),
+            Language::Gujarati => "gujarati".into(),
             // H
-            Language::Hebrew => "hebrew".to_string(),
-            Language::Hindi => "hindi".to_string(),
-            Language::Hungarian => "hungarian".to_string(),
+            Language::Hebrew => "hebrew".into(),
+            Language::Hindi => "hindi".into(),
+            Language::Hungarian => "hungarian".into(),
             // I
-            Language::Icelandic => "icelandic".to_string(),
-            Language::Indonesian => "indonesian".to_string(),
-            Language::Irish => "irish".to_string(),
-            Language::Italian => "italian".to_string(),
+            Language::Icelandic => "icelandic".into(),
+            Language::Indonesian => "indonesian".into(),
+            Language::Irish => "irish".into(),
+            Language::Italian => "italian".into(),
             // J
-            Language::Japanese => "japanese".to_string(),
+            Language::Japanese => "japanese".into(),
             // K
-            Language::Kazakh => "kazakh".to_string(),
-            Language::Korean => "korean".to_string(),
+            Language::Kazakh => "kazakh".into(),
+            Language::Korean => "korean".into(),
             // L
-            Language::Latin => "latin".to_string(),
-            Language::Latvian => "latvian".to_string(),
-            Language::Lithuanian => "lithuanian".to_string(),
+            Language::Latin => "latin".into(),
+            Language::Latvian => "latvian".into(),
+            Language::Lithuanian => "lithuanian".into(),
             // M
-            Language::Macedonian => "macedonian".to_string(),
-            Language::Malay => "malay".to_string(),
-            Language::Maori => "maori".to_string(),
-            Language::Marathi => "marathi".to_string(),
-            Language::Mongolian => "mongolian".to_string(),
+            Language::Macedonian => "macedonian".into(),
+            Language::Malay => "malay".into(),
+            Language::Maori => "maori".into(),
+            Language::Marathi => "marathi".into(),
+            Language::Mongolian => "mongolian".into(),
             // N
-            Language::Nynorsk => "nynorsk".to_string(),
+            Language::Nynorsk => "nynorsk".into(),
             // P
-            Language::Persian => "persian".to_string(),
-            Language::Polish => "polish".to_string(),
-            Language::Portuguese => "portuguese".to_string(),
-            Language::Punjabi => "punjabi".to_string(),
+            Language::Persian => "persian".into(),
+            Language::Polish => "polish".into(),
+            Language::Portuguese => "portuguese".into(),
+            Language::Punjabi => "punjabi".into(),
             // R
-            Language::Romanian => "romanian".to_string(),
-            Language::Russian => "russian".to_string(),
+            Language::Romanian => "romanian".into(),
+            Language::Russian => "russian".into(),
             // S
-            Language::Serbian => "serbian".to_string(),
-            Language::Shona => "shona".to_string(),
-            Language::Slovak => "slovak".to_string(),
-            Language::Slovene => "slovene".to_string(),
-            Language::Somali => "somali".to_string(),
-            Language::Sotho => "sotho".to_string(),
-            Language::Spanish => "spanish".to_string(),
-            Language::Swahili => "swahili".to_string(),
-            Language::Swedish => "swedish".to_string(),
+            Language::Serbian => "serbian".into(),
+            Language::Shona => "shona".into(),
+            Language::Slovak => "slovak".into(),
+            Language::Slovene => "slovene".into(),
+            Language::Somali => "somali".into(),
+            Language::Sotho => "sotho".into(),
+            Language::Spanish => "spanish".into(),
+            Language::Swahili => "swahili".into(),
+            Language::Swedish => "swedish".into(),
             // T
-            Language::Tagalog => "tagalog".to_string(),
-            Language::Tamil => "tamil".to_string(),
-            Language::Telugu => "telugu".to_string(),
-            Language::Thai => "thai".to_string(),
-            Language::Tsonga => "tsonga".to_string(),
-            Language::Tswana => "tswana".to_string(),
-            Language::Turkish => "turkish".to_string(),
+            Language::Tagalog => "tagalog".into(),
+            Language::Tamil => "tamil".into(),
+            Language::Telugu => "telugu".into(),
+            Language::Thai => "thai".into(),
+            Language::Tsonga => "tsonga".into(),
+            Language::Tswana => "tswana".into(),
+            Language::Turkish => "turkish".into(),
             // U
-            Language::Ukrainian => "ukrainian".to_string(),
-            Language::Urdu => "urdu".to_string(),
+            Language::Ukrainian => "ukrainian".into(),
+            Language::Urdu => "urdu".into(),
             // V
-            Language::Vietnamese => "vietnamese".to_string(),
+            Language::Vietnamese => "vietnamese".into(),
             // W
-            Language::Welsh => "welsh".to_string(),
+            Language::Welsh => "welsh".into(),
             // X
-            Language::Xhosa => "xhosa".to_string(),
+            Language::Xhosa => "xhosa".into(),
             // Y
-            Language::Yoruba => "yoruba".to_string(),
+            Language::Yoruba => "yoruba".into(),
             // Z
-            Language::Zulu => "zulu".to_string(),
+            Language::Zulu => "zulu".into(),
         }
     }
 }

@@ -18,20 +18,21 @@ static CONFIG_INSTANCE: OnceCell<AppConfig> = OnceCell::new();
 /// Application configuration structure.
 ///
 /// This struct represents the application's configuration settings
-/// that are loaded from a JSON configuration file.
+/// that are loaded from a JSON configuration file. String fields use
+/// `Box<str>` for memory efficiency since they are set once and never modified.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     /// Maximum allowed file size in bytes
     pub max_file_size: u64,
 
     /// Directory path for TensorRT engine cache files
-    pub rt_cache_directory: String,
+    pub rt_cache_directory: Box<str>,
 
     /// Directory path for model files
-    pub model_directory: String,
+    pub model_directory: Box<str>,
 
     /// Host URL for the server
-    pub host_url: String,
+    pub host_url: Box<str>,
 }
 
 impl AppConfig {
@@ -96,9 +97,9 @@ impl AppConfig {
     pub fn default_config() -> Self {
         Self {
             max_file_size: 1024 * 1024 * 1024, // 1 GB
-            rt_cache_directory: "models/trt_engines".to_string(),
-            model_directory: "models".to_string(),
-            host_url: "0.0.0.0:3000".to_string(),
+            rt_cache_directory: "models/trt_engines".into(),
+            model_directory: "models".into(),
+            host_url: "0.0.0.0:3000".into(),
         }
     }
 

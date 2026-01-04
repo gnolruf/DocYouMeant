@@ -122,10 +122,7 @@ impl Orientation {
             counts[idx] += 1;
         }
 
-        let (max_idx, _) = counts
-            .iter()
-            .enumerate()
-            .max_by_key(|&(_, &count)| count)?;
+        let (max_idx, _) = counts.iter().enumerate().max_by_key(|&(_, &count)| count)?;
 
         Some(match max_idx {
             0 => Orientation::Oriented0,

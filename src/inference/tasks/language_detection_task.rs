@@ -72,7 +72,7 @@ impl LanguageDetectionResult {
     /// A lowercase string representation of the language (e.g., "english", "chinese").
     #[must_use]
     pub fn language_name(&self) -> String {
-        LangUtils::map_from_lingua_language(self.language)
+        LangUtils::map_from_lingua_language(self.language).into_owned()
     }
 }
 

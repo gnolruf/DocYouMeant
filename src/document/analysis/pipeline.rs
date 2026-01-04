@@ -158,7 +158,7 @@ impl AnalysisPipeline {
 
                         page.orientation = Some(orientation);
                         page.detected_language =
-                            Some(LangUtils::map_from_lingua_language(language));
+                            Some(LangUtils::map_from_lingua_language(language).into_owned());
                         page.tables = tables;
 
                         let regions =
@@ -175,7 +175,7 @@ impl AnalysisPipeline {
 
                         page.orientation = Some(orientation);
                         page.detected_language =
-                            Some(LangUtils::map_from_lingua_language(language));
+                            Some(LangUtils::map_from_lingua_language(language).into_owned());
                         page.tables = tables;
                         if !words.is_empty() {
                             page.words = words;
@@ -203,7 +203,7 @@ impl AnalysisPipeline {
                         self.process_image_document(image, page.page_number, language_cache)?;
 
                     page.orientation = Some(orientation);
-                    page.detected_language = Some(LangUtils::map_from_lingua_language(language));
+                    page.detected_language = Some(LangUtils::map_from_lingua_language(language).into_owned());
                     page.tables = tables;
                     if !words.is_empty() {
                         page.words = words;
