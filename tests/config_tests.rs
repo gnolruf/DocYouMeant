@@ -14,9 +14,9 @@ fn test_parse_config_from_json() {
     let config: AppConfig = serde_json::from_str(json).unwrap();
 
     assert_eq!(config.max_file_size, 52428800);
-    assert_eq!(config.rt_cache_directory, "cache/trt");
-    assert_eq!(config.model_directory, "models");
-    assert_eq!(config.host_url, "127.0.0.1:8080");
+    assert_eq!(&*config.rt_cache_directory, "cache/trt");
+    assert_eq!(&*config.model_directory, "models");
+    assert_eq!(&*config.host_url, "127.0.0.1:8080");
 }
 
 #[test]
@@ -33,9 +33,9 @@ fn test_load_config_from_file() {
     let config = AppConfig::from_file(temp_file.path()).unwrap();
 
     assert_eq!(config.max_file_size, 104857600);
-    assert_eq!(config.rt_cache_directory, "models/trt_engines");
-    assert_eq!(config.model_directory, "models");
-    assert_eq!(config.host_url, "0.0.0.0:3000");
+    assert_eq!(&*config.rt_cache_directory, "models/trt_engines");
+    assert_eq!(&*config.model_directory, "models");
+    assert_eq!(&*config.host_url, "0.0.0.0:3000");
 }
 
 #[test]
@@ -43,9 +43,9 @@ fn test_default_config() {
     let config = AppConfig::default();
 
     assert_eq!(config.max_file_size, 1024 * 1024 * 1024);
-    assert_eq!(config.rt_cache_directory, "models/trt_engines");
-    assert_eq!(config.model_directory, "models");
-    assert_eq!(config.host_url, "0.0.0.0:3000");
+    assert_eq!(&*config.rt_cache_directory, "models/trt_engines");
+    assert_eq!(&*config.model_directory, "models");
+    assert_eq!(&*config.host_url, "0.0.0.0:3000");
 }
 
 #[test]
