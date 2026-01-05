@@ -83,7 +83,7 @@ impl Document {
             DocumentType::Excel => ExcelContent::load(bytes)?,
             DocumentType::Csv => CsvContent::load(bytes)?,
             DocumentType::Png | DocumentType::Jpeg | DocumentType::Tiff => {
-                ImageContent::load(bytes, doc_type.clone())?
+                ImageContent::load(bytes, &doc_type)?
             }
         };
 

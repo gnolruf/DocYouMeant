@@ -39,7 +39,7 @@ impl ImageContent {
     /// # Arguments
     ///
     /// * `bytes` - The raw bytes of the image file.
-    /// * `doc_type` - The document type indicating the image format
+    /// * `doc_type` - A reference to the document type indicating the image format
     ///   ([`DocumentType::Png`], [`DocumentType::Jpeg`], or [`DocumentType::Tiff`]).
     ///
     /// # Returns
@@ -55,7 +55,7 @@ impl ImageContent {
     /// - Memory allocation for the decoded image fails
     pub fn load(
         bytes: &[u8],
-        doc_type: DocumentType,
+        doc_type: &DocumentType,
     ) -> Result<Box<dyn DocumentContent>, DocumentError> {
         let img = image::load_from_memory(bytes)
             .map_err(|source| DocumentError::ImageLoadError { source })?
@@ -64,7 +64,7 @@ impl ImageContent {
         let page = PageContent::with_image(1, img);
 
         Ok(Box::new(Self {
-            doc_type,
+            doc_type: doc_type.clone(),
             pages: vec![page],
         }))
     }
