@@ -69,7 +69,7 @@ macro_rules! impl_simple_singleton {
 /// - A `get_or_init(key)` method for eager initialization of a specific key
 /// - An `instance(key)` method for accessing the singleton for a specific key
 ///
-/// The key type must implement `Eq + Hash + Clone + Copy + Send + Sync + 'static`.
+/// The key type must implement `Eq + Hash + Clone + Send + Sync + 'static`.
 ///
 /// # Generated Methods
 ///
@@ -120,9 +120,9 @@ macro_rules! impl_keyed_singleton {
                     }
                 })?;
 
-                if !write_guard.contains_key(&key) {
-                    let model = Self::new(key.clone())?;
-                    write_guard.insert(key, ::std::sync::Mutex::new(model));
+                if let ::std::collections::hash_map::Entry::Vacant(e) = write_guard.entry(key.clone()) {
+                    let model = Self::new(key)?;
+                    e.insert(::std::sync::Mutex::new(model));
                 }
 
                 Ok(())
