@@ -21,7 +21,7 @@ use crate::inference::{
     lcnet::{LCNet, LCNetMode, LCNetResult},
     rtdetr::{RtDetr, RtDetrMode, RtDetrResult},
 };
-use crate::utils::lang_utils::LangUtils;
+use crate::utils::lang_utils::{Directionality, LangUtils};
 use crate::utils::{box_utils, image_utils};
 
 /// Result type for image document processing.
@@ -381,7 +381,10 @@ impl AnalysisPipeline {
         debug!("Detected {} raw text lines", text_lines.len());
 
         let bounds_list: Vec<_> = text_lines.iter().map(|t| t.bounds).collect();
-        let ordered_indices = box_utils::graph_based_reading_order(&bounds_list);
+        // Use LTR as default since language is unknown at detection time.
+        // For RTL languages, the reading order will still be top-to-bottom,
+        // but horizontal ordering within rows defaults to left-to-right.
+        let ordered_indices = box_utils::graph_based_reading_order(&bounds_list, Directionality::Ltr);
         let ordered_text_lines: Vec<TextBox> = ordered_indices
             .iter()
             .filter_map(|&idx| {
@@ -843,7 +846,7 @@ impl AnalysisPipeline {
             }
         };
 
-        let words = Crnn::recognize(language, &rotated_parts, &mut text_lines)
+        let (words, _directionality) = Crnn::recognize(language, &rotated_parts, &mut text_lines)
             .map_err(|source| DocumentError::ModelProcessingError { source })?;
         debug!("Recognized text for {} lines", words.len());
 

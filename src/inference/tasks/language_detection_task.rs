@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::document::text_box::TextBox;
 use crate::inference::crnn::Crnn;
 use crate::inference::error::InferenceError;
-use crate::utils::lang_utils::{LangUtils, ModelGroup};
+use crate::utils::lang_utils::{Directionality, LangUtils, ModelGroup};
 
 /// Maximum number of text lines to sample for language detection
 const MAX_SAMPLE_LINES: usize = 3;
@@ -154,7 +154,8 @@ impl LanguageDetectionTask {
 
         Crnn::with_instance(model_file.to_string(), |crnn| {
             let images_owned: Vec<RgbImage> = images.iter().map(|img| (*img).clone()).collect();
-            crnn.get_texts(&images_owned, &mut text_boxes)
+            // Use LTR as default since we're detecting language and don't know directionality yet
+            crnn.get_texts(&images_owned, &mut text_boxes, Directionality::Ltr)
         })?;
 
         let mut total_score = 0.0;

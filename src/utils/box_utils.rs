@@ -5,6 +5,7 @@ use std::collections::BinaryHeap;
 
 use crate::document::bounds::Bounds;
 use crate::utils::error::BoxError;
+use crate::utils::lang_utils::Directionality;
 use geo::{Area, BooleanOps, Coord, LineString, Polygon};
 use geo_clipper::Clipper;
 
@@ -312,12 +313,13 @@ pub fn get_min_boxes(corner_points: &[Coord<i32>; 4]) -> ([Coord<i32>; 4], f32) 
 ///
 /// This function establishes a partial ordering of text boxes based on their
 /// spatial relationships, then performs a topological sort to produce a linear
-/// reading sequence that respects the natural left-to-right, top-to-bottom
-/// reading flow.
+/// reading sequence that respects the natural reading flow based on the
+/// specified text directionality.
 ///
 /// # Arguments
 ///
 /// * `bounds_list` - Slice of bounding boxes to order
+/// * `directionality` - Text direction (LTR or RTL) affecting horizontal ordering
 ///
 /// # Returns
 ///
@@ -328,7 +330,7 @@ pub fn get_min_boxes(corner_points: &[Coord<i32>; 4]) -> ([Coord<i32>; 4], f32) 
 /// # Algorithm
 ///
 /// 1. Build a directed graph where edge (i, j) means box i should be read before box j
-/// 2. Edges are added based on spatial relationships (above/left-of)
+/// 2. Edges are added based on spatial relationships (above/left-of for LTR, above/right-of for RTL)
 /// 3. Topological sort using Kahn's algorithm with tie-breaking by position
 /// 4. Handle cycles by appending remaining nodes in spatial order
 ///
@@ -336,7 +338,7 @@ pub fn get_min_boxes(corner_points: &[Coord<i32>; 4]) -> ([Coord<i32>; 4], f32) 
 ///
 /// Returns 1-indexed positions to match common document labeling conventions.
 #[must_use]
-pub fn graph_based_reading_order(bounds_list: &[Bounds]) -> Vec<usize> {
+pub fn graph_based_reading_order(bounds_list: &[Bounds], directionality: Directionality) -> Vec<usize> {
     if bounds_list.is_empty() {
         return Vec::new();
     }
@@ -352,7 +354,7 @@ pub fn graph_based_reading_order(bounds_list: &[Bounds]) -> Vec<usize> {
                 continue;
             }
 
-            if should_come_before(&bounds_list[i], &bounds_list[j]) {
+            if should_come_before(&bounds_list[i], &bounds_list[j], directionality) {
                 graph[i].push(j);
                 in_degree[j] += 1;
             }
@@ -362,10 +364,16 @@ pub fn graph_based_reading_order(bounds_list: &[Bounds]) -> Vec<usize> {
     let mut heap: BinaryHeap<Reverse<(i32, i32, usize)>> = BinaryHeap::with_capacity(n);
     let mut result: Vec<usize> = Vec::with_capacity(n);
 
+    // For RTL, we want to process rightmost boxes first (negate x for heap ordering)
+    let x_factor = match directionality {
+        Directionality::Ltr => 1,
+        Directionality::Rtl => -1,
+    };
+
     for (i, &deg) in in_degree.iter().enumerate() {
         if deg == 0 {
             let bounds = &bounds_list[i];
-            heap.push(Reverse((bounds.center_y(), bounds.center_x(), i)));
+            heap.push(Reverse((bounds.center_y(), bounds.center_x() * x_factor, i)));
         }
     }
 
@@ -376,7 +384,7 @@ pub fn graph_based_reading_order(bounds_list: &[Bounds]) -> Vec<usize> {
             in_degree[neighbor] -= 1;
             if in_degree[neighbor] == 0 {
                 let bounds = &bounds_list[neighbor];
-                heap.push(Reverse((bounds.center_y(), bounds.center_x(), neighbor)));
+                heap.push(Reverse((bounds.center_y(), bounds.center_x() * x_factor, neighbor)));
             }
         }
     }
@@ -389,7 +397,10 @@ pub fn graph_based_reading_order(bounds_list: &[Bounds]) -> Vec<usize> {
             let bounds_b = &bounds_list[b];
 
             match bounds_a.center_y().cmp(&bounds_b.center_y()) {
-                std::cmp::Ordering::Equal => bounds_a.center_x().cmp(&bounds_b.center_x()),
+                std::cmp::Ordering::Equal => match directionality {
+                    Directionality::Ltr => bounds_a.center_x().cmp(&bounds_b.center_x()),
+                    Directionality::Rtl => bounds_b.center_x().cmp(&bounds_a.center_x()),
+                },
                 other => other,
             }
         });
@@ -403,17 +414,20 @@ pub fn graph_based_reading_order(bounds_list: &[Bounds]) -> Vec<usize> {
 ///
 /// This function implements the heuristics for establishing reading order:
 /// - A box clearly above another comes first
-/// - For boxes on roughly the same line, the leftmost comes first
+/// - For boxes on roughly the same line:
+///   - LTR: the leftmost comes first
+///   - RTL: the rightmost comes first
 ///
 /// # Arguments
 ///
 /// * `bounds_i` - Bounds for the first box
 /// * `bounds_j` - Bounds for the second box
+/// * `directionality` - Text direction (LTR or RTL)
 ///
 /// # Returns
 ///
 /// `true` if box i should be read before box j, `false` otherwise.
-fn should_come_before(bounds_i: &Bounds, bounds_j: &Bounds) -> bool {
+fn should_come_before(bounds_i: &Bounds, bounds_j: &Bounds, directionality: Directionality) -> bool {
     let avg_height = (bounds_i.height() + bounds_j.height()) / 2;
 
     let vertical_separation = bounds_j.center_y() - bounds_i.center_y();
@@ -423,11 +437,25 @@ fn should_come_before(bounds_i: &Bounds, bounds_j: &Bounds) -> bool {
     }
 
     let vertical_threshold = (avg_height as f32 * 0.5) as i32;
-    if vertical_separation.abs() <= vertical_threshold
-        && bounds_i.center_x() < bounds_j.center_x()
-        && bounds_i.right() <= bounds_j.left() + (avg_height / 4)
-    {
-        return true;
+    if vertical_separation.abs() <= vertical_threshold {
+        match directionality {
+            Directionality::Ltr => {
+                // LTR: leftmost box comes first
+                if bounds_i.center_x() < bounds_j.center_x()
+                    && bounds_i.right() <= bounds_j.left() + (avg_height / 4)
+                {
+                    return true;
+                }
+            }
+            Directionality::Rtl => {
+                // RTL: rightmost box comes first
+                if bounds_i.center_x() > bounds_j.center_x()
+                    && bounds_i.left() >= bounds_j.right() - (avg_height / 4)
+                {
+                    return true;
+                }
+            }
+        }
     }
 
     false

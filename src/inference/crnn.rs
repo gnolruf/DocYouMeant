@@ -17,7 +17,7 @@ use crate::document::text_box::TextBox;
 use crate::impl_keyed_singleton;
 use crate::inference::error::InferenceError;
 use crate::utils::image_utils;
-use crate::utils::lang_utils::LangUtils;
+use crate::utils::lang_utils::{Directionality, LangUtils};
 use geo::Coord;
 
 /// Text recognition engine using CRNN (Convolutional Recurrent Neural Network).
@@ -141,13 +141,18 @@ impl Crnn {
     ///
     /// # Returns
     ///
-    /// * `Ok(Vec<TextBox>)` - All word-level text boxes from all lines
-    /// * `Err(InferenceError)` - If recognition fails
+    /// A tuple containing:
+    /// * `Vec<TextBox>` - All word-level text boxes from all lines
+    /// * `Directionality` - The text directionality for this language
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if recognition fails.
     pub fn recognize(
         language: Language,
         part_imgs: &[RgbImage],
         text_boxes: &mut [TextBox],
-    ) -> Result<Vec<TextBox>, InferenceError> {
+    ) -> Result<(Vec<TextBox>, Directionality), InferenceError> {
         let model_info = LangUtils::get_language_model_info(language).ok_or_else(|| {
             let lang_str = LangUtils::map_from_lingua_language(language);
             InferenceError::ModelFileLoadError {
@@ -155,15 +160,18 @@ impl Crnn {
                 source: ort::Error::new(format!("Unsupported language: {lang_str}")),
             }
         })?;
-        Self::with_instance(model_info.model_file, |crnn| {
-            crnn.get_texts(part_imgs, text_boxes)
-        })
+        let directionality = model_info.directionality;
+        let words = Self::with_instance(model_info.model_file, |crnn| {
+            crnn.get_texts(part_imgs, text_boxes, directionality)
+        })?;
+        Ok((words, directionality))
     }
 
     /// Recognizes text from multiple text line images in batch.
     ///
     /// Processes multiple cropped text line images in a single batched forward pass.
-    /// Images are padded to uniform width before batching.
+    /// Images are padded to uniform width before batching. For RTL languages,
+    /// padding is applied on the left side to maintain proper text alignment.
     /// Maintains a consistent global character offset across all lines for
     /// document-wide span tracking, starting from offset 0.
     ///
@@ -171,6 +179,7 @@ impl Crnn {
     ///
     /// * `part_imgs` - Slice of RGB images, one per text line
     /// * `text_boxes` - Mutable slice of text boxes to update with results
+    /// * `directionality` - Text direction (LTR or RTL) affecting padding and word bounds
     ///
     /// # Returns
     ///
@@ -180,6 +189,7 @@ impl Crnn {
         &mut self,
         part_imgs: &[RgbImage],
         text_boxes: &mut [TextBox],
+        directionality: Directionality,
     ) -> Result<Vec<TextBox>, InferenceError> {
         if part_imgs.is_empty() {
             return Ok(Vec::new());
@@ -211,12 +221,17 @@ impl Crnn {
         let normalized_arrays: Vec<_> = resized_images
             .iter()
             .map(|img| {
-                let padding_right = max_width.saturating_sub(img.width());
+                let padding_amount = max_width.saturating_sub(img.width());
+                // For RTL, pad on the left; for LTR, pad on the right
+                let (padding_left, padding_right) = match directionality {
+                    Directionality::Ltr => (0, padding_amount),
+                    Directionality::Rtl => (padding_amount, 0),
+                };
                 let padded = image_utils::add_image_padding(
                     img,
                     0,
                     0,
-                    0,
+                    padding_left,
                     padding_right,
                     Some(Rgb([127, 127, 127])),
                 );
@@ -285,6 +300,7 @@ impl Crnn {
                 vocab_size,
                 &text_boxes[i],
                 current_offset,
+                directionality,
             )?;
 
             text_boxes[i].text = Some(text.clone());
@@ -314,6 +330,7 @@ impl Crnn {
     /// * `w` - Width dimension of the output (vocabulary size)
     /// * `text_box` - Parent text box for calculating word positions
     /// * `global_offset` - Starting character offset for document span tracking
+    /// * `directionality` - Text direction (LTR or RTL) affecting word bounds calculation
     ///
     /// # Returns
     ///
@@ -329,6 +346,7 @@ impl Crnn {
         w: usize,
         text_box: &TextBox,
         global_offset: usize,
+        directionality: Directionality,
     ) -> Result<(String, f32, Vec<TextBox>, usize), InferenceError> {
         let mut str_res = String::new();
         let mut scores = Vec::new();
@@ -365,7 +383,7 @@ impl Crnn {
                     if !current_word.is_empty() {
                         if let Some(start_pos) = word_start_pos {
                             let word_bounds =
-                                self.calculate_word_bounds(text_box, start_pos, i - 1, h);
+                                self.calculate_word_bounds(text_box, start_pos, i - 1, h, directionality);
 
                             let word_score = if word_scores.is_empty() {
                                 0.0
@@ -411,7 +429,7 @@ impl Crnn {
 
         if !current_word.is_empty() {
             if let Some(start_pos) = word_start_pos {
-                let word_bounds = self.calculate_word_bounds(text_box, start_pos, h - 1, h);
+                let word_bounds = self.calculate_word_bounds(text_box, start_pos, h - 1, h, directionality);
 
                 let word_score = if word_scores.is_empty() {
                     0.0
@@ -448,7 +466,8 @@ impl Crnn {
     ///
     /// Given a text line's bounding box and a word's position within the CTC output
     /// sequence, computes the approximate bounding box for that word using linear
-    /// interpolation along the text line.
+    /// interpolation along the text line. For RTL text, positions are calculated
+    /// from right to left.
     ///
     /// # Arguments
     ///
@@ -456,6 +475,7 @@ impl Crnn {
     /// * `start_pos` - Starting position in the output sequence
     /// * `end_pos` - Ending position in the output sequence
     /// * `total_length` - Total length of the output sequence
+    /// * `directionality` - Text direction (LTR or RTL)
     ///
     /// # Returns
     ///
@@ -467,33 +487,47 @@ impl Crnn {
         start_pos: usize,
         end_pos: usize,
         total_length: usize,
+        directionality: Directionality,
     ) -> [Coord<i32>; 4] {
-        let start_ratio = start_pos as f32 / total_length as f32;
-        let end_ratio = (end_pos + 1) as f32 / total_length as f32;
-
         let top_left = text_box.bounds[0];
         let top_right = text_box.bounds[1];
         let bottom_right = text_box.bounds[2];
         let bottom_left = text_box.bounds[3];
 
+        // For LTR: start_ratio maps to left edge, end_ratio maps to right edge
+        // For RTL: start_ratio maps to right edge, end_ratio maps to left edge
+        let (left_ratio, right_ratio) = match directionality {
+            Directionality::Ltr => {
+                let start_ratio = start_pos as f32 / total_length as f32;
+                let end_ratio = (end_pos + 1) as f32 / total_length as f32;
+                (start_ratio, end_ratio)
+            }
+            Directionality::Rtl => {
+                // For RTL, invert the ratios (start from the right side)
+                let start_ratio = 1.0 - ((end_pos + 1) as f32 / total_length as f32);
+                let end_ratio = 1.0 - (start_pos as f32 / total_length as f32);
+                (start_ratio, end_ratio)
+            }
+        };
+
         let word_top_left = Coord {
-            x: top_left.x + ((top_right.x - top_left.x) as f32 * start_ratio) as i32,
-            y: top_left.y + ((top_right.y - top_left.y) as f32 * start_ratio) as i32,
+            x: top_left.x + ((top_right.x - top_left.x) as f32 * left_ratio) as i32,
+            y: top_left.y + ((top_right.y - top_left.y) as f32 * left_ratio) as i32,
         };
 
         let word_top_right = Coord {
-            x: top_left.x + ((top_right.x - top_left.x) as f32 * end_ratio) as i32,
-            y: top_left.y + ((top_right.y - top_left.y) as f32 * end_ratio) as i32,
+            x: top_left.x + ((top_right.x - top_left.x) as f32 * right_ratio) as i32,
+            y: top_left.y + ((top_right.y - top_left.y) as f32 * right_ratio) as i32,
         };
 
         let word_bottom_right = Coord {
-            x: bottom_left.x + ((bottom_right.x - bottom_left.x) as f32 * end_ratio) as i32,
-            y: bottom_left.y + ((bottom_right.y - bottom_left.y) as f32 * end_ratio) as i32,
+            x: bottom_left.x + ((bottom_right.x - bottom_left.x) as f32 * right_ratio) as i32,
+            y: bottom_left.y + ((bottom_right.y - bottom_left.y) as f32 * right_ratio) as i32,
         };
 
         let word_bottom_left = Coord {
-            x: bottom_left.x + ((bottom_right.x - bottom_left.x) as f32 * start_ratio) as i32,
-            y: bottom_left.y + ((bottom_right.y - bottom_left.y) as f32 * start_ratio) as i32,
+            x: bottom_left.x + ((bottom_right.x - bottom_left.x) as f32 * left_ratio) as i32,
+            y: bottom_left.y + ((bottom_right.y - bottom_left.y) as f32 * left_ratio) as i32,
         };
 
         [

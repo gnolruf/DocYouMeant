@@ -4,6 +4,7 @@ use docyoumeant::utils::box_utils::{
     apply_nms, calculate_iou, calculate_overlap, get_min_boxes, graph_based_reading_order,
     unclip_box,
 };
+use docyoumeant::utils::lang_utils::Directionality;
 use geo::Coord;
 
 // ============================================================================
@@ -543,7 +544,7 @@ fn make_bounds(coords: [Coord<i32>; 4]) -> Bounds {
 #[test]
 fn test_reading_order_empty() {
     let boxes: Vec<Bounds> = vec![];
-    let result = graph_based_reading_order(&boxes);
+    let result = graph_based_reading_order(&boxes, Directionality::Ltr);
     assert!(result.is_empty());
 }
 
@@ -555,7 +556,7 @@ fn test_reading_order_single() {
         Coord { x: 10, y: 10 },
         Coord { x: 0, y: 10 },
     ])];
-    let result = graph_based_reading_order(&boxes);
+    let result = graph_based_reading_order(&boxes, Directionality::Ltr);
     assert_eq!(result, vec![1]);
 }
 
@@ -582,7 +583,7 @@ fn test_reading_order_left_to_right() {
             Coord { x: 100, y: 50 },
         ]),
     ];
-    let result = graph_based_reading_order(&boxes);
+    let result = graph_based_reading_order(&boxes, Directionality::Ltr);
     // Should be: 2 (left), 3 (middle), 1 (right)
     assert_eq!(result, vec![2, 3, 1]);
 }
@@ -610,7 +611,7 @@ fn test_reading_order_top_to_bottom() {
             Coord { x: 0, y: 50 },
         ]),
     ];
-    let result = graph_based_reading_order(&boxes);
+    let result = graph_based_reading_order(&boxes, Directionality::Ltr);
     // Should be ordered by y: 3 (top), 1 (middle), 2 (bottom)
     assert_eq!(result, vec![3, 1, 2]);
 }
@@ -648,7 +649,7 @@ fn test_reading_order_two_columns() {
             Coord { x: 150, y: 70 },
         ]),
     ];
-    let result = graph_based_reading_order(&boxes);
+    let result = graph_based_reading_order(&boxes, Directionality::Ltr);
     // Reading order should respect spatial layout
     assert_eq!(result.len(), 4);
 }
@@ -684,7 +685,7 @@ fn test_reading_order_with_text_boxes() {
         },
     ];
     let bounds: Vec<_> = text_boxes.iter().map(|t| t.bounds).collect();
-    let result = graph_based_reading_order(&bounds);
+    let result = graph_based_reading_order(&bounds, Directionality::Ltr);
     // Second box (index 1) comes first spatially
     assert_eq!(result, vec![2, 1]);
 }
