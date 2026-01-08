@@ -96,6 +96,26 @@ impl LangUtils {
         }
     }
 
+    /// Gets the text directionality for a language.
+    ///
+    /// Returns the directionality (LTR or RTL) for the specified language
+    /// based on its configuration. Defaults to LTR if the language configuration
+    /// is not found.
+    ///
+    /// # Arguments
+    ///
+    /// * `language` - The Lingua `Language` enum value to look up.
+    ///
+    /// # Returns
+    ///
+    /// The text directionality for the language, defaulting to LTR.
+    #[must_use]
+    pub fn get_directionality(language: Language) -> Directionality {
+        Self::get_language_model_info(language)
+            .map(|info| info.directionality)
+            .unwrap_or_default()
+    }
+
     /// Parses a language string and returns the corresponding Lingua Language enum.
     ///
     /// This is useful for converting command-line arguments or configuration strings

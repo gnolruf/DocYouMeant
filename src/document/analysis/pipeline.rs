@@ -368,8 +368,10 @@ impl AnalysisPipeline {
     ///
     /// # Returns
     ///
-    /// A vector of [`TextBox`] instances representing detected text regions,
-    /// ordered in natural reading order.
+    /// A vector of [`TextBox`] instances representing detected text regions.
+    /// Note: Text lines are returned in detection order, not reading order.
+    /// Use [`sort_text_elements_by_reading_order`] after language detection to
+    /// sort by the correct reading order based on text directionality.
     ///
     /// # Errors
     ///
@@ -379,21 +381,62 @@ impl AnalysisPipeline {
         let text_lines =
             DBNet::run(image).map_err(|source| DocumentError::ModelProcessingError { source })?;
         debug!("Detected {} raw text lines", text_lines.len());
+        Ok(text_lines)
+    }
 
-        let bounds_list: Vec<_> = text_lines.iter().map(|t| t.bounds).collect();
-        // Use LTR as default since language is unknown at detection time.
-        // For RTL languages, the reading order will still be top-to-bottom,
-        // but horizontal ordering within rows defaults to left-to-right.
-        let ordered_indices = box_utils::graph_based_reading_order(&bounds_list, Directionality::Ltr);
-        let ordered_text_lines: Vec<TextBox> = ordered_indices
+    /// Sorts text elements by reading order and recalculates document spans.
+    ///
+    /// This function should be called after language detection/OCR when the
+    /// text directionality is known. It sorts the text elements based on their
+    /// spatial positions according to the reading direction, then recalculates
+    /// document spans based on the final sorted order.
+    ///
+    /// # Arguments
+    ///
+    /// * `text_elements` - Mutable slice of text boxes to sort and update
+    /// * `directionality` - Text direction (LTR or RTL) for reading order
+    ///
+    /// # Side Effects
+    ///
+    /// - Reorders the text elements in place
+    /// - Updates the `span` field of each element based on its position in the sorted order
+    fn sort_text_elements_by_reading_order(
+        text_elements: &mut [TextBox],
+        directionality: Directionality,
+    ) {
+        if text_elements.is_empty() {
+            return;
+        }
+
+        // Get sorted indices
+        let bounds_list: Vec<_> = text_elements.iter().map(|t| t.bounds).collect();
+        let ordered_indices = box_utils::graph_based_reading_order(&bounds_list, directionality);
+
+        // Create a new sorted vector
+        let sorted: Vec<TextBox> = ordered_indices
             .iter()
             .filter_map(|&idx| {
                 let box_idx = idx.saturating_sub(1);
-                text_lines.get(box_idx).cloned()
+                text_elements.get(box_idx).cloned()
             })
             .collect();
 
-        Ok(ordered_text_lines)
+        // Copy back and recalculate spans
+        let mut current_offset = 0;
+        for (i, sorted_item) in sorted.into_iter().enumerate() {
+            text_elements[i] = sorted_item;
+            let text_len = text_elements[i]
+                .text
+                .as_ref()
+                .map(|t| t.len())
+                .unwrap_or(0);
+            text_elements[i].span = Some(crate::document::text_box::DocumentSpan::new(
+                current_offset,
+                text_len,
+            ));
+            // Add 1 for the newline/space between lines
+            current_offset += text_len + 1;
+        }
     }
 
     /// Detects the document layout structure.
@@ -672,6 +715,11 @@ impl AnalysisPipeline {
             }
         };
 
+        // Sort text lines by reading order now that we know the language/directionality
+        let directionality = LangUtils::get_directionality(language);
+        Self::sort_text_elements_by_reading_order(&mut text_lines, directionality);
+        debug!("Sorted text lines by {:?} reading order", directionality);
+
         let (layout_boxes, mut tables) = if self.process_mode == ProcessMode::Read {
             (Vec::new(), Vec::new())
         } else {
@@ -709,10 +757,11 @@ impl AnalysisPipeline {
     /// Updates each text line in place with:
     /// - `text`: Concatenated words separated by spaces
     /// - `text_score`: Average confidence of matched words
-    /// - `span`: Document span for the text content
     /// - `angle`: Set to `Oriented0` if not already set
+    ///
+    /// Note: Document spans are NOT calculated here. Call [`sort_text_elements_by_reading_order`]
+    /// after language detection to sort elements and calculate spans in the correct reading order.
     fn match_embedded_text_to_lines(text_lines: &mut [TextBox], embedded_words: &[TextBox]) {
-        let mut current_offset = 0;
         for text_line in text_lines.iter_mut() {
             let mut matched_texts = Vec::new();
             let mut total_confidence = 0.0;
@@ -734,14 +783,9 @@ impl AnalysisPipeline {
 
             if !matched_texts.is_empty() {
                 let text = matched_texts.join(" ");
-                let length = text.len();
                 text_line.text = Some(text);
                 text_line.text_score = total_confidence / text_count as f32;
-                text_line.span = Some(crate::document::text_box::DocumentSpan::new(
-                    current_offset,
-                    length,
-                ));
-                current_offset += length + 1;
+                // Spans will be calculated after sorting by reading order
 
                 if text_line.angle.is_none() {
                     text_line.angle = Some(Orientation::Oriented0);
@@ -846,9 +890,14 @@ impl AnalysisPipeline {
             }
         };
 
-        let (words, _directionality) = Crnn::recognize(language, &rotated_parts, &mut text_lines)
+        let (mut words, directionality) = Crnn::recognize(language, &rotated_parts, &mut text_lines)
             .map_err(|source| DocumentError::ModelProcessingError { source })?;
         debug!("Recognized text for {} lines", words.len());
+
+        // Sort text lines and words by reading order now that we know the directionality
+        Self::sort_text_elements_by_reading_order(&mut text_lines, directionality);
+        Self::sort_text_elements_by_reading_order(&mut words, directionality);
+        debug!("Sorted text elements by {:?} reading order", directionality);
 
         let (layout_boxes, mut tables) = if self.process_mode == ProcessMode::Read {
             (Vec::new(), Vec::new())
