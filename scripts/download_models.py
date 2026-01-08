@@ -202,36 +202,39 @@ class HuggingFaceModelProcessor(ModelProcessor):
 
 def generate_ocr_lang_models_config(models_dir: Path, models: dict) -> None:
     """Generate a JSON config file for language models.
-    
+
     For each language, prioritizes models where is_script_model is false
     over script-based models that may technically support the language.
     """
     ocr_lang_models = {}
-    
+
     for model_name, model_info in models.items():
         if "languages" in model_info and "dict_filename" in model_info:
             is_script_model = model_info.get("is_script_model", False)
-            
+            directionality = model_info.get("directionality", "ltr")
+
             for language in model_info["languages"]:
                 if language not in ocr_lang_models:
                     ocr_lang_models[language] = {
                         "name": language,
                         "model_file": f"models/onnx/{model_info['output']}",
                         "dict_file": f"models/dict/{model_info['dict_filename']}",
-                        "is_script_model": is_script_model
+                        "is_script_model": is_script_model,
+                        "directionality": directionality
                     }
                 elif not is_script_model and ocr_lang_models[language].get("is_script_model", False):
                     ocr_lang_models[language] = {
                         "name": language,
                         "model_file": f"models/onnx/{model_info['output']}",
                         "dict_file": f"models/dict/{model_info['dict_filename']}",
-                        "is_script_model": is_script_model
+                        "is_script_model": is_script_model,
+                        "directionality": directionality
                     }
-    
+
     config_file = models_dir / "ocr_lang_models.json"
     with open(config_file, 'w') as f:
         json.dump(ocr_lang_models, f, indent=2)
-    
+
     print(f"Generated language models config: {config_file}")
 
 def filter_models_by_language(models: dict, target_language: str = None) -> dict:

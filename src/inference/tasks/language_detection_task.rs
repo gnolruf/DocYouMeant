@@ -152,9 +152,13 @@ impl LanguageDetectionTask {
         let images: Vec<&RgbImage> = samples.iter().map(|(_, img)| *img).collect();
         let mut text_boxes: Vec<TextBox> = samples.iter().map(|(tb, _)| (*tb).clone()).collect();
 
+        let directionality = LangUtils::get_model_info_by_file(model_file)
+            .map(|info| info.directionality)
+            .unwrap_or_default();
+
         Crnn::with_instance(model_file.to_string(), |crnn| {
             let images_owned: Vec<RgbImage> = images.iter().map(|img| (*img).clone()).collect();
-            crnn.get_texts(&images_owned, &mut text_boxes)
+            crnn.get_texts(&images_owned, &mut text_boxes, directionality)
         })?;
 
         let mut total_score = 0.0;

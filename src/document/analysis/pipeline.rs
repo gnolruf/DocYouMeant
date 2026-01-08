@@ -21,7 +21,7 @@ use crate::inference::{
     lcnet::{LCNet, LCNetMode, LCNetResult},
     rtdetr::{RtDetr, RtDetrMode, RtDetrResult},
 };
-use crate::utils::lang_utils::LangUtils;
+use crate::utils::lang_utils::{Directionality, LangUtils};
 use crate::utils::{box_utils, image_utils};
 
 /// Result type for image document processing.
@@ -203,7 +203,8 @@ impl AnalysisPipeline {
                         self.process_image_document(image, page.page_number, language_cache)?;
 
                     page.orientation = Some(orientation);
-                    page.detected_language = Some(LangUtils::map_from_lingua_language(language).into_owned());
+                    page.detected_language =
+                        Some(LangUtils::map_from_lingua_language(language).into_owned());
                     page.tables = tables;
                     if !words.is_empty() {
                         page.words = words;
@@ -368,8 +369,7 @@ impl AnalysisPipeline {
     ///
     /// # Returns
     ///
-    /// A vector of [`TextBox`] instances representing detected text regions,
-    /// ordered in natural reading order.
+    /// A vector of [`TextBox`] instances representing detected text regions.
     ///
     /// # Errors
     ///
@@ -379,18 +379,73 @@ impl AnalysisPipeline {
         let text_lines =
             DBNet::run(image).map_err(|source| DocumentError::ModelProcessingError { source })?;
         debug!("Detected {} raw text lines", text_lines.len());
+        Ok(text_lines)
+    }
 
-        let bounds_list: Vec<_> = text_lines.iter().map(|t| t.bounds).collect();
-        let ordered_indices = box_utils::graph_based_reading_order(&bounds_list);
-        let ordered_text_lines: Vec<TextBox> = ordered_indices
+    /// Sorts text elements by reading order and recalculates document spans.
+    ///
+    /// This function should be called after language detection when the
+    /// text directionality is known. It sorts the text elements based on their
+    /// spatial positions according to the reading direction, then recalculates
+    /// document spans based on the final sorted order.
+    ///
+    /// # Arguments
+    ///
+    /// * `text_elements` - Mutable slice of text boxes to sort and update
+    /// * `directionality` - Text direction (LTR or RTL) for reading order
+    /// * `images` - Optional mutable slice of images to sort in the same order.
+    ///   Must be the same length as `text_elements` if provided.
+    ///
+    /// # Side Effects
+    ///
+    /// - Reorders the text elements in place
+    /// - If images provided with matching length, reorders them in the same order
+    /// - Updates the `span` field of each element based on its position in the sorted order
+    fn sort_text_elements_by_reading_order(
+        text_elements: &mut [TextBox],
+        directionality: Directionality,
+        images: Option<&mut Vec<RgbImage>>,
+    ) {
+        if text_elements.is_empty() {
+            return;
+        }
+
+        let bounds_list: Vec<_> = text_elements.iter().map(|t| t.bounds).collect();
+        let ordered_indices = box_utils::graph_based_reading_order(&bounds_list, directionality);
+
+        let sorted: Vec<TextBox> = ordered_indices
             .iter()
             .filter_map(|&idx| {
                 let box_idx = idx.saturating_sub(1);
-                text_lines.get(box_idx).cloned()
+                text_elements.get(box_idx).cloned()
             })
             .collect();
 
-        Ok(ordered_text_lines)
+        if let Some(imgs) = images {
+            if imgs.len() == text_elements.len() {
+                let sorted_imgs: Vec<RgbImage> = ordered_indices
+                    .iter()
+                    .filter_map(|&idx| {
+                        let box_idx = idx.saturating_sub(1);
+                        imgs.get(box_idx).cloned()
+                    })
+                    .collect();
+                for (i, img) in sorted_imgs.into_iter().enumerate() {
+                    imgs[i] = img;
+                }
+            }
+        }
+
+        let mut current_offset = 0;
+        for (i, sorted_item) in sorted.into_iter().enumerate() {
+            text_elements[i] = sorted_item;
+            let text_len = text_elements[i].text.as_ref().map(|t| t.len()).unwrap_or(0);
+            text_elements[i].span = Some(crate::document::text_box::DocumentSpan::new(
+                current_offset,
+                text_len,
+            ));
+            current_offset += text_len + 1;
+        }
     }
 
     /// Detects the document layout structure.
@@ -669,6 +724,10 @@ impl AnalysisPipeline {
             }
         };
 
+        let directionality = LangUtils::get_directionality(language);
+        Self::sort_text_elements_by_reading_order(&mut text_lines, directionality, None);
+        debug!("Sorted text lines by {:?} reading order", directionality);
+
         let (layout_boxes, mut tables) = if self.process_mode == ProcessMode::Read {
             (Vec::new(), Vec::new())
         } else {
@@ -706,10 +765,8 @@ impl AnalysisPipeline {
     /// Updates each text line in place with:
     /// - `text`: Concatenated words separated by spaces
     /// - `text_score`: Average confidence of matched words
-    /// - `span`: Document span for the text content
     /// - `angle`: Set to `Oriented0` if not already set
     fn match_embedded_text_to_lines(text_lines: &mut [TextBox], embedded_words: &[TextBox]) {
-        let mut current_offset = 0;
         for text_line in text_lines.iter_mut() {
             let mut matched_texts = Vec::new();
             let mut total_confidence = 0.0;
@@ -731,14 +788,8 @@ impl AnalysisPipeline {
 
             if !matched_texts.is_empty() {
                 let text = matched_texts.join(" ");
-                let length = text.len();
                 text_line.text = Some(text);
                 text_line.text_score = total_confidence / text_count as f32;
-                text_line.span = Some(crate::document::text_box::DocumentSpan::new(
-                    current_offset,
-                    length,
-                ));
-                current_offset += length + 1;
 
                 if text_line.angle.is_none() {
                     text_line.angle = Some(Orientation::Oriented0);
@@ -820,7 +871,7 @@ impl AnalysisPipeline {
             }
         }
 
-        let rotated_parts = image_utils::rotate_images_by_angle(&image_parts, &text_lines);
+        let mut rotated_parts = image_utils::rotate_images_by_angle(&image_parts, &text_lines);
 
         let language = match language_cache {
             Some(lang) => {
@@ -843,7 +894,15 @@ impl AnalysisPipeline {
             }
         };
 
-        let words = Crnn::recognize(language, &rotated_parts, &mut text_lines)
+        let directionality = LangUtils::get_directionality(language);
+        Self::sort_text_elements_by_reading_order(
+            &mut text_lines,
+            directionality,
+            Some(&mut rotated_parts),
+        );
+        debug!("Sorted text lines by {:?} reading order", directionality);
+
+        let (words, _) = Crnn::recognize(language, &rotated_parts, &mut text_lines)
             .map_err(|source| DocumentError::ModelProcessingError { source })?;
         debug!("Recognized text for {} lines", words.len());
 

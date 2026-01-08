@@ -9,6 +9,20 @@ use serde::{Deserialize, Serialize};
 
 use super::config::AppConfig;
 
+/// Text directionality for a language.
+///
+/// Indicates whether a language is read left-to-right (LTR) or right-to-left (RTL).
+/// This affects text line ordering, word sorting, and OCR image padding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Directionality {
+    /// Left-to-right text direction
+    #[default]
+    Ltr,
+    /// Right-to-left text direction
+    Rtl,
+}
+
 /// Configuration for a language's OCR model and dictionary.
 ///
 /// This struct holds the necessary file paths and metadata for loading
@@ -23,6 +37,9 @@ pub struct LanguageModelInfo {
     pub dict_file: String,
     /// Whether this is a script-based model (covers multiple languages using the same script).
     pub is_script_model: bool,
+    /// Text directionality for this language (LTR or RTL).
+    #[serde(default)]
+    pub directionality: Directionality,
 }
 
 /// A group of languages that share the same OCR model.
@@ -70,12 +87,33 @@ impl LangUtils {
                         model_file: config.model_path("onnx/text_recognition_en.onnx"),
                         dict_file: config.model_path("dict/en_dict.txt"),
                         is_script_model: false,
+                        directionality: Directionality::Ltr,
                     })
                 } else {
                     None
                 }
             }
         }
+    }
+
+    /// Gets the text directionality for a language.
+    ///
+    /// Returns the directionality (LTR or RTL) for the specified language
+    /// based on its configuration. Defaults to LTR if the language configuration
+    /// is not found.
+    ///
+    /// # Arguments
+    ///
+    /// * `language` - The Lingua `Language` enum value to look up.
+    ///
+    /// # Returns
+    ///
+    /// The text directionality for the language, defaulting to LTR.
+    #[must_use]
+    pub fn get_directionality(language: Language) -> Directionality {
+        Self::get_language_model_info(language)
+            .map(|info| info.directionality)
+            .unwrap_or_default()
     }
 
     /// Parses a language string and returns the corresponding Lingua Language enum.

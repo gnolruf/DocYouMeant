@@ -120,7 +120,9 @@ macro_rules! impl_keyed_singleton {
                     }
                 })?;
 
-                if let ::std::collections::hash_map::Entry::Vacant(e) = write_guard.entry(key.clone()) {
+                if let ::std::collections::hash_map::Entry::Vacant(e) =
+                    write_guard.entry(key.clone())
+                {
                     let model = Self::new(key)?;
                     e.insert(::std::sync::Mutex::new(model));
                 }

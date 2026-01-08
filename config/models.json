@@ -79,6 +79,7 @@
     "text_recognition_arabic": {
         "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/arabic_PP-OCRv5_mobile_rec_infer.tar",
         "languages": ["arabic", "persian"],
+        "directionality": "rtl",
         "is_script_model": true,
         "dir": "arabic_PP-OCRv5_mobile_rec_infer",
         "output": "text_recognition_arabic.onnx",
