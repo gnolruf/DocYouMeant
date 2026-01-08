@@ -771,7 +771,6 @@ impl AnalysisPipeline {
                 let text = matched_texts.join(" ");
                 text_line.text = Some(text);
                 text_line.text_score = total_confidence / text_count as f32;
-                // Spans will be calculated after sorting by reading order
 
                 if text_line.angle.is_none() {
                     text_line.angle = Some(Orientation::Oriented0);
