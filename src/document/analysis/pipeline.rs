@@ -384,7 +384,7 @@ impl AnalysisPipeline {
 
     /// Sorts text elements by reading order and recalculates document spans.
     ///
-    /// This function should be called after language detection/OCR when the
+    /// This function should be called after language detection when the
     /// text directionality is known. It sorts the text elements based on their
     /// spatial positions according to the reading direction, then recalculates
     /// document spans based on the final sorted order.
@@ -393,14 +393,18 @@ impl AnalysisPipeline {
     ///
     /// * `text_elements` - Mutable slice of text boxes to sort and update
     /// * `directionality` - Text direction (LTR or RTL) for reading order
+    /// * `images` - Optional mutable slice of images to sort in the same order.
+    ///   Must be the same length as `text_elements` if provided.
     ///
     /// # Side Effects
     ///
     /// - Reorders the text elements in place
+    /// - If images provided with matching length, reorders them in the same order
     /// - Updates the `span` field of each element based on its position in the sorted order
     fn sort_text_elements_by_reading_order(
         text_elements: &mut [TextBox],
         directionality: Directionality,
+        images: Option<&mut Vec<RgbImage>>,
     ) {
         if text_elements.is_empty() {
             return;
@@ -416,6 +420,21 @@ impl AnalysisPipeline {
                 text_elements.get(box_idx).cloned()
             })
             .collect();
+
+        if let Some(imgs) = images {
+            if imgs.len() == text_elements.len() {
+                let sorted_imgs: Vec<RgbImage> = ordered_indices
+                    .iter()
+                    .filter_map(|&idx| {
+                        let box_idx = idx.saturating_sub(1);
+                        imgs.get(box_idx).cloned()
+                    })
+                    .collect();
+                for (i, img) in sorted_imgs.into_iter().enumerate() {
+                    imgs[i] = img;
+                }
+            }
+        }
 
         let mut current_offset = 0;
         for (i, sorted_item) in sorted.into_iter().enumerate() {
@@ -706,7 +725,7 @@ impl AnalysisPipeline {
         };
 
         let directionality = LangUtils::get_directionality(language);
-        Self::sort_text_elements_by_reading_order(&mut text_lines, directionality);
+        Self::sort_text_elements_by_reading_order(&mut text_lines, directionality, None);
         debug!("Sorted text lines by {:?} reading order", directionality);
 
         let (layout_boxes, mut tables) = if self.process_mode == ProcessMode::Read {
@@ -852,7 +871,7 @@ impl AnalysisPipeline {
             }
         }
 
-        let rotated_parts = image_utils::rotate_images_by_angle(&image_parts, &text_lines);
+        let mut rotated_parts = image_utils::rotate_images_by_angle(&image_parts, &text_lines);
 
         let language = match language_cache {
             Some(lang) => {
@@ -875,14 +894,17 @@ impl AnalysisPipeline {
             }
         };
 
-        let (mut words, directionality) =
-            Crnn::recognize(language, &rotated_parts, &mut text_lines)
-                .map_err(|source| DocumentError::ModelProcessingError { source })?;
-        debug!("Recognized text for {} lines", words.len());
+        let directionality = LangUtils::get_directionality(language);
+        Self::sort_text_elements_by_reading_order(
+            &mut text_lines,
+            directionality,
+            Some(&mut rotated_parts),
+        );
+        debug!("Sorted text lines by {:?} reading order", directionality);
 
-        Self::sort_text_elements_by_reading_order(&mut text_lines, directionality);
-        Self::sort_text_elements_by_reading_order(&mut words, directionality);
-        debug!("Sorted text elements by {:?} reading order", directionality);
+        let (words, _) = Crnn::recognize(language, &rotated_parts, &mut text_lines)
+            .map_err(|source| DocumentError::ModelProcessingError { source })?;
+        debug!("Recognized text for {} lines", words.len());
 
         let (layout_boxes, mut tables) = if self.process_mode == ProcessMode::Read {
             (Vec::new(), Vec::new())
