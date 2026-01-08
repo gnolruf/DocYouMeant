@@ -16,10 +16,10 @@ use super::config::AppConfig;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Directionality {
-    /// Left-to-right text direction (e.g., English, Spanish, Chinese).
+    /// Left-to-right text direction
     #[default]
     Ltr,
-    /// Right-to-left text direction (e.g., Arabic, Hebrew, Persian).
+    /// Right-to-left text direction
     Rtl,
 }
 

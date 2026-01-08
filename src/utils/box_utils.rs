@@ -338,7 +338,10 @@ pub fn get_min_boxes(corner_points: &[Coord<i32>; 4]) -> ([Coord<i32>; 4], f32) 
 ///
 /// Returns 1-indexed positions to match common document labeling conventions.
 #[must_use]
-pub fn graph_based_reading_order(bounds_list: &[Bounds], directionality: Directionality) -> Vec<usize> {
+pub fn graph_based_reading_order(
+    bounds_list: &[Bounds],
+    directionality: Directionality,
+) -> Vec<usize> {
     if bounds_list.is_empty() {
         return Vec::new();
     }
@@ -364,7 +367,6 @@ pub fn graph_based_reading_order(bounds_list: &[Bounds], directionality: Directi
     let mut heap: BinaryHeap<Reverse<(i32, i32, usize)>> = BinaryHeap::with_capacity(n);
     let mut result: Vec<usize> = Vec::with_capacity(n);
 
-    // For RTL, we want to process rightmost boxes first (negate x for heap ordering)
     let x_factor = match directionality {
         Directionality::Ltr => 1,
         Directionality::Rtl => -1,
@@ -373,7 +375,11 @@ pub fn graph_based_reading_order(bounds_list: &[Bounds], directionality: Directi
     for (i, &deg) in in_degree.iter().enumerate() {
         if deg == 0 {
             let bounds = &bounds_list[i];
-            heap.push(Reverse((bounds.center_y(), bounds.center_x() * x_factor, i)));
+            heap.push(Reverse((
+                bounds.center_y(),
+                bounds.center_x() * x_factor,
+                i,
+            )));
         }
     }
 
@@ -384,7 +390,11 @@ pub fn graph_based_reading_order(bounds_list: &[Bounds], directionality: Directi
             in_degree[neighbor] -= 1;
             if in_degree[neighbor] == 0 {
                 let bounds = &bounds_list[neighbor];
-                heap.push(Reverse((bounds.center_y(), bounds.center_x() * x_factor, neighbor)));
+                heap.push(Reverse((
+                    bounds.center_y(),
+                    bounds.center_x() * x_factor,
+                    neighbor,
+                )));
             }
         }
     }
@@ -427,7 +437,11 @@ pub fn graph_based_reading_order(bounds_list: &[Bounds], directionality: Directi
 /// # Returns
 ///
 /// `true` if box i should be read before box j, `false` otherwise.
-fn should_come_before(bounds_i: &Bounds, bounds_j: &Bounds, directionality: Directionality) -> bool {
+fn should_come_before(
+    bounds_i: &Bounds,
+    bounds_j: &Bounds,
+    directionality: Directionality,
+) -> bool {
     let avg_height = (bounds_i.height() + bounds_j.height()) / 2;
 
     let vertical_separation = bounds_j.center_y() - bounds_i.center_y();
@@ -440,7 +454,6 @@ fn should_come_before(bounds_i: &Bounds, bounds_j: &Bounds, directionality: Dire
     if vertical_separation.abs() <= vertical_threshold {
         match directionality {
             Directionality::Ltr => {
-                // LTR: leftmost box comes first
                 if bounds_i.center_x() < bounds_j.center_x()
                     && bounds_i.right() <= bounds_j.left() + (avg_height / 4)
                 {
@@ -448,7 +461,6 @@ fn should_come_before(bounds_i: &Bounds, bounds_j: &Bounds, directionality: Dire
                 }
             }
             Directionality::Rtl => {
-                // RTL: rightmost box comes first
                 if bounds_i.center_x() > bounds_j.center_x()
                     && bounds_i.left() >= bounds_j.right() - (avg_height / 4)
                 {

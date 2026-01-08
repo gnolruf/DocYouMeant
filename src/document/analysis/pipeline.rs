@@ -203,7 +203,8 @@ impl AnalysisPipeline {
                         self.process_image_document(image, page.page_number, language_cache)?;
 
                     page.orientation = Some(orientation);
-                    page.detected_language = Some(LangUtils::map_from_lingua_language(language).into_owned());
+                    page.detected_language =
+                        Some(LangUtils::map_from_lingua_language(language).into_owned());
                     page.tables = tables;
                     if !words.is_empty() {
                         page.words = words;
@@ -369,9 +370,6 @@ impl AnalysisPipeline {
     /// # Returns
     ///
     /// A vector of [`TextBox`] instances representing detected text regions.
-    /// Note: Text lines are returned in detection order, not reading order.
-    /// Use [`sort_text_elements_by_reading_order`] after language detection to
-    /// sort by the correct reading order based on text directionality.
     ///
     /// # Errors
     ///
@@ -408,11 +406,9 @@ impl AnalysisPipeline {
             return;
         }
 
-        // Get sorted indices
         let bounds_list: Vec<_> = text_elements.iter().map(|t| t.bounds).collect();
         let ordered_indices = box_utils::graph_based_reading_order(&bounds_list, directionality);
 
-        // Create a new sorted vector
         let sorted: Vec<TextBox> = ordered_indices
             .iter()
             .filter_map(|&idx| {
@@ -421,20 +417,14 @@ impl AnalysisPipeline {
             })
             .collect();
 
-        // Copy back and recalculate spans
         let mut current_offset = 0;
         for (i, sorted_item) in sorted.into_iter().enumerate() {
             text_elements[i] = sorted_item;
-            let text_len = text_elements[i]
-                .text
-                .as_ref()
-                .map(|t| t.len())
-                .unwrap_or(0);
+            let text_len = text_elements[i].text.as_ref().map(|t| t.len()).unwrap_or(0);
             text_elements[i].span = Some(crate::document::text_box::DocumentSpan::new(
                 current_offset,
                 text_len,
             ));
-            // Add 1 for the newline/space between lines
             current_offset += text_len + 1;
         }
     }
@@ -715,7 +705,6 @@ impl AnalysisPipeline {
             }
         };
 
-        // Sort text lines by reading order now that we know the language/directionality
         let directionality = LangUtils::get_directionality(language);
         Self::sort_text_elements_by_reading_order(&mut text_lines, directionality);
         debug!("Sorted text lines by {:?} reading order", directionality);
@@ -758,9 +747,6 @@ impl AnalysisPipeline {
     /// - `text`: Concatenated words separated by spaces
     /// - `text_score`: Average confidence of matched words
     /// - `angle`: Set to `Oriented0` if not already set
-    ///
-    /// Note: Document spans are NOT calculated here. Call [`sort_text_elements_by_reading_order`]
-    /// after language detection to sort elements and calculate spans in the correct reading order.
     fn match_embedded_text_to_lines(text_lines: &mut [TextBox], embedded_words: &[TextBox]) {
         for text_line in text_lines.iter_mut() {
             let mut matched_texts = Vec::new();
@@ -890,11 +876,11 @@ impl AnalysisPipeline {
             }
         };
 
-        let (mut words, directionality) = Crnn::recognize(language, &rotated_parts, &mut text_lines)
-            .map_err(|source| DocumentError::ModelProcessingError { source })?;
+        let (mut words, directionality) =
+            Crnn::recognize(language, &rotated_parts, &mut text_lines)
+                .map_err(|source| DocumentError::ModelProcessingError { source })?;
         debug!("Recognized text for {} lines", words.len());
 
-        // Sort text lines and words by reading order now that we know the directionality
         Self::sort_text_elements_by_reading_order(&mut text_lines, directionality);
         Self::sort_text_elements_by_reading_order(&mut words, directionality);
         debug!("Sorted text elements by {:?} reading order", directionality);

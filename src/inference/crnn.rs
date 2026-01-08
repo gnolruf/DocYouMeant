@@ -222,7 +222,6 @@ impl Crnn {
             .iter()
             .map(|img| {
                 let padding_amount = max_width.saturating_sub(img.width());
-                // For RTL, pad on the left; for LTR, pad on the right
                 let (padding_left, padding_right) = match directionality {
                     Directionality::Ltr => (0, padding_amount),
                     Directionality::Rtl => (padding_amount, 0),
@@ -382,8 +381,13 @@ impl Crnn {
                     let mut processed = false;
                     if !current_word.is_empty() {
                         if let Some(start_pos) = word_start_pos {
-                            let word_bounds =
-                                self.calculate_word_bounds(text_box, start_pos, i - 1, h, directionality);
+                            let word_bounds = self.calculate_word_bounds(
+                                text_box,
+                                start_pos,
+                                i - 1,
+                                h,
+                                directionality,
+                            );
 
                             let word_score = if word_scores.is_empty() {
                                 0.0
@@ -429,7 +433,8 @@ impl Crnn {
 
         if !current_word.is_empty() {
             if let Some(start_pos) = word_start_pos {
-                let word_bounds = self.calculate_word_bounds(text_box, start_pos, h - 1, h, directionality);
+                let word_bounds =
+                    self.calculate_word_bounds(text_box, start_pos, h - 1, h, directionality);
 
                 let word_score = if word_scores.is_empty() {
                     0.0
@@ -494,8 +499,6 @@ impl Crnn {
         let bottom_right = text_box.bounds[2];
         let bottom_left = text_box.bounds[3];
 
-        // For LTR: start_ratio maps to left edge, end_ratio maps to right edge
-        // For RTL: start_ratio maps to right edge, end_ratio maps to left edge
         let (left_ratio, right_ratio) = match directionality {
             Directionality::Ltr => {
                 let start_ratio = start_pos as f32 / total_length as f32;
@@ -503,7 +506,6 @@ impl Crnn {
                 (start_ratio, end_ratio)
             }
             Directionality::Rtl => {
-                // For RTL, invert the ratios (start from the right side)
                 let start_ratio = 1.0 - ((end_pos + 1) as f32 / total_length as f32);
                 let end_ratio = 1.0 - (start_pos as f32 / total_length as f32);
                 (start_ratio, end_ratio)
