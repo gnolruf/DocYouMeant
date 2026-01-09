@@ -1,6 +1,6 @@
 {
   "max_file_size": 1073741824,
-  "rt_cache_directory": "models/trt_engines",
   "model_directory": "models",
-  "host_url": "0.0.0.0:3000"
+  "host_url": "0.0.0.0:3000",
+  "default_model_set": "edge"
 }

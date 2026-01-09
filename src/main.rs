@@ -14,15 +14,20 @@ use std::env;
 #[command(name = "docyoumeant")]
 #[command(about = "A configurable document understanding pipeline server")]
 struct Args {
+    /// Target language for OCR processing
     #[arg(long, short = 'l')]
     language: Option<String>,
+
+    /// Model set to use (e.g., "edge", "server"). Overrides default_model_set in config.
+    #[arg(long, short = 'm')]
+    model_set: Option<String>,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
-    let _config = AppConfig::init()?;
+    let config = AppConfig::init(args.model_set)?;
 
     setup_ort()?;
 
@@ -32,6 +37,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or_else(|_| "docyoumeant=info,tower_http=debug".into()),
         )
         .init();
+
+    tracing::info!("Using model set: {}", config.model_set());
 
     // Parse language from command line argument (None if not provided)
     let language = args

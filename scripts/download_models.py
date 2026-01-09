@@ -5,6 +5,7 @@ import subprocess
 import shutil
 import json
 import argparse
+import sys
 from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional
@@ -15,16 +16,20 @@ def load_models_config(config_path: Path) -> Dict[str, Any]:
         return json.load(f)
 
 class ModelProcessor(ABC):
-    def __init__(self, model_name: str, config: Dict[str, Any], base_dir: Path):
+    def __init__(self, model_name: str, config: Dict[str, Any], base_dir: Path, model_set: str):
         self.model_name = model_name
         self.config = config
         self.base_dir = base_dir
-        self.models_dir = base_dir / "models"
+        self.model_set = model_set
+        self.models_dir = base_dir / "models" / model_set
         self.download_dir = self.models_dir / "download"
         self.onnx_dir = self.models_dir / "onnx"
+        self.dict_dir = self.models_dir / "dict"
         self.tokenizer_dir = self.models_dir / "tokenizer"
-        
-        for d in [self.models_dir, self.download_dir, self.onnx_dir, self.tokenizer_dir]:
+        self.trt_engines_dir = self.models_dir / "trt_engines"
+
+        for d in [self.models_dir, self.download_dir, self.onnx_dir, self.dict_dir,
+                  self.tokenizer_dir, self.trt_engines_dir]:
             d.mkdir(parents=True, exist_ok=True)
 
     @abstractmethod
@@ -44,18 +49,18 @@ class PaddleModelProcessor(ModelProcessor):
         tar_path = self.download_dir / f"{self.model_name}.tar"
         print(f"Downloading {self.config['url']}...")
         self._download_file(self.config['url'], tar_path)
-        
+
         print("Extracting...")
         extract_path = self.download_dir / self.model_name
         self._extract_tar(tar_path, extract_path)
-        
+
         print("Converting to ONNX...")
         model_dir = extract_path / self.config['dir']
         output_path = self.onnx_dir / self.config['output']
         self._convert_to_onnx(
-            model_dir, 
-            output_path, 
-            self.config['model_filename'], 
+            model_dir,
+            output_path,
+            self.config['model_filename'],
             self.config['params_filename']
         )
 
@@ -67,7 +72,7 @@ class PaddleModelProcessor(ModelProcessor):
     def _download_file(self, url: str, dest_path: Path) -> None:
         response = requests.get(url, stream=True)
         response.raise_for_status()
-        
+
         with open(dest_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
@@ -89,7 +94,7 @@ class PaddleModelProcessor(ModelProcessor):
 class HuggingFaceModelProcessor(ModelProcessor):
     def process(self):
         print(f"Downloading from Hugging Face: {self.config['repo']}...")
-        
+
         variants = self.config.get("variants", [])
         if not variants:
             variants = [{
@@ -98,17 +103,17 @@ class HuggingFaceModelProcessor(ModelProcessor):
                 "source_subdir": self.config.get("source_subdir", ""),
                 "onnx_files": self.config.get("onnx_files", [])
             }]
-        
+
         for variant in variants:
             self._process_variant(variant)
-            
+
         if "tokenizer_files" in self.config and "tokenizer_dir" in self.config:
             self._process_tokenizer()
 
     def _process_variant(self, variant: Dict[str, Any]):
         variant_name = variant.get("name", "default")
         print(f"\nProcessing {variant_name.upper()} variant...")
-        
+
         if variant_name == "default":
              temp_output_dir = self.download_dir / self.config['output_dir']
         else:
@@ -120,11 +125,11 @@ class HuggingFaceModelProcessor(ModelProcessor):
             temp_output_dir
         )
         print(f"Successfully downloaded {self.model_name} ({variant_name})")
-        
+
         onnx_files = variant.get('onnx_files', self.config.get('onnx_files', []))
         if onnx_files:
-            print(f"Moving {variant_name.upper()} ONNX files to models/onnx/...")
-            
+            print(f"Moving {variant_name.upper()} ONNX files to {self.model_set}/onnx/...")
+
             if "onnx_subdir" in self.config:
                 if variant_name == "default":
                     model_onnx_dir = self.onnx_dir / self.config['onnx_subdir']
@@ -138,7 +143,7 @@ class HuggingFaceModelProcessor(ModelProcessor):
                 else:
                     model_onnx_dir = self.onnx_dir / variant_name
                     model_onnx_dir.mkdir(parents=True, exist_ok=True)
-            
+
             source_subdir = variant.get('source_subdir', '')
             for onnx_file in onnx_files:
                 src_file = temp_output_dir / source_subdir / onnx_file
@@ -148,14 +153,14 @@ class HuggingFaceModelProcessor(ModelProcessor):
                     print(f"  Copied {onnx_file} -> {dst_file.relative_to(self.onnx_dir)}")
                 else:
                     print(f"  Warning: {onnx_file} not found at {src_file}")
-        
+
         self.cleanup(temp_output_dir)
 
     def _process_tokenizer(self):
-        print("\nMoving tokenizer files to models/tokenizer/...")
+        print(f"\nMoving tokenizer files to {self.model_set}/tokenizer/...")
         model_tokenizer_dir = self.tokenizer_dir / self.config['tokenizer_dir']
         model_tokenizer_dir.mkdir(exist_ok=True)
-        
+
         tokenizer_source = self.config.get('tokenizer_source_subdir')
         if tokenizer_source is None:
              variants = self.config.get("variants", [])
@@ -165,18 +170,18 @@ class HuggingFaceModelProcessor(ModelProcessor):
                  tokenizer_source = self.config.get("source_subdir", "")
 
         temp_tokenizer_dir = self.download_dir / f"{self.config['output_dir']}_tokenizer"
-        
+
         if tokenizer_source:
             combined_pattern = f"{tokenizer_source}/*.json"
         else:
             combined_pattern = "*.json"
-        
+
         self._download_huggingface_model(
             self.config['repo'],
             combined_pattern,
             temp_tokenizer_dir
         )
-        
+
         for tokenizer_file in self.config['tokenizer_files']:
             if tokenizer_source:
                 src_file = temp_tokenizer_dir / tokenizer_source / tokenizer_file
@@ -189,7 +194,7 @@ class HuggingFaceModelProcessor(ModelProcessor):
                 print(f"  Copied {tokenizer_file} -> {model_tokenizer_dir.relative_to(self.tokenizer_dir)}/{tokenizer_file}")
             else:
                 print(f"  Warning: {tokenizer_file} not found at {src_file}")
-        
+
         self.cleanup(temp_tokenizer_dir)
 
     def _download_huggingface_model(self, repo: str, include_pattern: str, output_dir: Path) -> None:
@@ -205,6 +210,8 @@ def generate_ocr_lang_models_config(models_dir: Path, models: dict) -> None:
 
     For each language, prioritizes models where is_script_model is false
     over script-based models that may technically support the language.
+
+    Paths are relative to the model set directory.
     """
     ocr_lang_models = {}
 
@@ -217,16 +224,16 @@ def generate_ocr_lang_models_config(models_dir: Path, models: dict) -> None:
                 if language not in ocr_lang_models:
                     ocr_lang_models[language] = {
                         "name": language,
-                        "model_file": f"models/onnx/{model_info['output']}",
-                        "dict_file": f"models/dict/{model_info['dict_filename']}",
+                        "model_file": f"onnx/{model_info['output']}",
+                        "dict_file": f"dict/{model_info['dict_filename']}",
                         "is_script_model": is_script_model,
                         "directionality": directionality
                     }
                 elif not is_script_model and ocr_lang_models[language].get("is_script_model", False):
                     ocr_lang_models[language] = {
                         "name": language,
-                        "model_file": f"models/onnx/{model_info['output']}",
-                        "dict_file": f"models/dict/{model_info['dict_filename']}",
+                        "model_file": f"onnx/{model_info['output']}",
+                        "dict_file": f"dict/{model_info['dict_filename']}",
                         "is_script_model": is_script_model,
                         "directionality": directionality
                     }
@@ -240,26 +247,32 @@ def generate_ocr_lang_models_config(models_dir: Path, models: dict) -> None:
 def filter_models_by_language(models: dict, target_language: str = None) -> dict:
     if target_language is None:
         return models
-    
+
     filtered_models = {}
     for model_name, model_info in models.items():
         if "languages" not in model_info:
             filtered_models[model_name] = model_info
         elif target_language in model_info.get("languages", []):
             filtered_models[model_name] = model_info
-    
+
     return filtered_models
 
-def get_processor(model_name: str, config: Dict[str, Any], base_dir: Path) -> ModelProcessor:
+def get_processor(model_name: str, config: Dict[str, Any], base_dir: Path, model_set: str) -> ModelProcessor:
     if config.get("type") == "huggingface":
-        return HuggingFaceModelProcessor(model_name, config, base_dir)
-    return PaddleModelProcessor(model_name, config, base_dir)
+        return HuggingFaceModelProcessor(model_name, config, base_dir, model_set)
+    return PaddleModelProcessor(model_name, config, base_dir, model_set)
 
 def main():
     parser = argparse.ArgumentParser(description="Download and convert PaddleOCR models to ONNX format")
     parser.add_argument(
-        "--language", 
-        type=str, 
+        "--model-set",
+        type=str,
+        default="edge",
+        help="Model set name (e.g., 'edge', 'server'). Downloads to models/{model_set}/ and reads config from config/models/{model_set}.json"
+    )
+    parser.add_argument(
+        "--language",
+        type=str,
         help="Download models for specific language only (e.g., 'english', 'chinese'). Models without language property are always downloaded."
     )
     parser.add_argument(
@@ -268,30 +281,41 @@ def main():
         help="Only generate the ocr_lang_models.json config file without downloading any models."
     )
     args = parser.parse_args()
-    
-    models_config_path = Path(__file__).parent.parent / "config" / "models.json"
-    models = load_models_config(models_config_path)
-    
-    models_to_process = filter_models_by_language(models, args.language)
-    
+
     base_dir = Path(__file__).parent.parent
-    models_dir = base_dir / "models"
-    
+
+    # Load model set config from config/models/{model_set}.json
+    models_config_path = base_dir / "config" / "models" / f"{args.model_set}.json"
+    if not models_config_path.exists():
+        available_configs = list((base_dir / "config" / "models").glob("*.json"))
+        available_sets = [p.stem for p in available_configs]
+        print(f"Error: Model set config not found: {models_config_path}")
+        print(f"Available model sets: {available_sets}")
+        sys.exit(1)
+
+    models = load_models_config(models_config_path)
+    print(f"Using model set: {args.model_set}")
+
+    models_to_process = filter_models_by_language(models, args.language)
+
+    models_dir = base_dir / "models" / args.model_set
+    models_dir.mkdir(parents=True, exist_ok=True)
+
     if args.generate_lang_config:
         print("Generating language models config only...")
         generate_ocr_lang_models_config(models_dir, models_to_process)
         return
-    
+
     if args.language:
         print(f"Filtering models for language: {args.language}")
         print(f"Models to process: {list(models_to_process.keys())}")
     else:
         print("Processing all models")
-    
+
     for model_name, model_info in models_to_process.items():
-        processor = get_processor(model_name, model_info, base_dir)
+        processor = get_processor(model_name, model_info, base_dir, args.model_set)
         processor.process()
-    
+
     generate_ocr_lang_models_config(models_dir, models_to_process)
 
     download_dir = models_dir / "download"
