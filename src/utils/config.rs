@@ -150,7 +150,12 @@ impl AppConfig {
     /// Returns the full path to a model file
     #[must_use]
     pub fn model_path(&self, relative_path: &str) -> String {
-        format!("{}/{}/{}", self.model_directory, self.model_set(), relative_path)
+        format!(
+            "{}/{}/{}",
+            self.model_directory,
+            self.model_set(),
+            relative_path
+        )
     }
 
     /// Get the TensorRT cache directory for the active model set.
