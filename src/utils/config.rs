@@ -90,7 +90,6 @@ impl AppConfig {
         CONFIG_INSTANCE.get_or_try_init(|| {
             let mut config = Self::load_default()?;
 
-            // Determine effective model set: CLI arg takes precedence over config default
             let effective_model_set = model_set
                 .or_else(|| config.default_model_set.as_ref().map(|s| s.to_string()))
                 .ok_or(ConfigError::MissingModelSet)?;
@@ -148,7 +147,7 @@ impl AppConfig {
     ///
     /// # Returns
     ///
-    /// Returns the full path: `{model_directory}/{model_set}/{relative_path}`
+    /// Returns the full path to a model file
     #[must_use]
     pub fn model_path(&self, relative_path: &str) -> String {
         format!("{}/{}/{}", self.model_directory, self.model_set(), relative_path)

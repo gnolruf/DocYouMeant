@@ -27,7 +27,7 @@ struct Args {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
-    let config = AppConfig::init(args.model_set)?;
+    let _config = AppConfig::init(args.model_set)?;
 
     setup_ort()?;
 
@@ -37,8 +37,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or_else(|_| "docyoumeant=info,tower_http=debug".into()),
         )
         .init();
-
-    tracing::info!("Using model set: {}", config.model_set());
 
     // Parse language from command line argument (None if not provided)
     let language = args
@@ -77,7 +75,7 @@ async fn run_server(language: Option<Language>) -> Result<(), Box<dyn std::error
     Ok(())
 }
 
-/// Preloads all machine learning models into memory.
+/// Preloads all models into memory.
 ///
 /// This function initializes and caches all inference models used by the
 /// document analysis pipeline. Calling this at server startup ensures that
