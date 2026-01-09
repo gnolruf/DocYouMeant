@@ -1,4 +1,3 @@
-import os
 import tarfile
 import requests
 import subprocess
@@ -8,12 +7,14 @@ import argparse
 import sys
 from pathlib import Path
 from abc import ABC, abstractmethod
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any
 from huggingface_hub import snapshot_download
+
 
 def load_models_config(config_path: Path) -> Dict[str, Any]:
     with open(config_path, 'r') as f:
         return json.load(f)
+
 
 class ModelProcessor(ABC):
     def __init__(self, model_name: str, config: Dict[str, Any], base_dir: Path, model_set: str):
@@ -42,6 +43,7 @@ class ModelProcessor(ABC):
                 shutil.rmtree(path)
             else:
                 path.unlink()
+
 
 class PaddleModelProcessor(ModelProcessor):
     def process(self):
@@ -90,6 +92,7 @@ class PaddleModelProcessor(ModelProcessor):
             "--save_file", str(output_file)
         ]
         subprocess.run(cmd, check=True)
+
 
 class HuggingFaceModelProcessor(ModelProcessor):
     def process(self):
@@ -205,6 +208,7 @@ class HuggingFaceModelProcessor(ModelProcessor):
             local_dir_use_symlinks=False
         )
 
+
 def generate_ocr_lang_models_config(models_dir: Path, models: dict) -> None:
     """Generate a JSON config file for language models.
 
@@ -244,6 +248,7 @@ def generate_ocr_lang_models_config(models_dir: Path, models: dict) -> None:
 
     print(f"Generated language models config: {config_file}")
 
+
 def filter_models_by_language(models: dict, target_language: str = None) -> dict:
     if target_language is None:
         return models
@@ -257,10 +262,12 @@ def filter_models_by_language(models: dict, target_language: str = None) -> dict
 
     return filtered_models
 
+
 def get_processor(model_name: str, config: Dict[str, Any], base_dir: Path, model_set: str) -> ModelProcessor:
     if config.get("type") == "huggingface":
         return HuggingFaceModelProcessor(model_name, config, base_dir, model_set)
     return PaddleModelProcessor(model_name, config, base_dir, model_set)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Download and convert PaddleOCR models to ONNX format")

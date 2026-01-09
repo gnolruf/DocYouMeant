@@ -18,7 +18,7 @@ struct Args {
     #[arg(long, short = 'l')]
     language: Option<String>,
 
-    /// Model set to use (e.g., "edge", "server"). Overrides default_model_set in config.
+    /// Model set to use, Overrides default_model_set in config.
     #[arg(long, short = 'm')]
     model_set: Option<String>,
 }
