@@ -17,17 +17,13 @@ struct Args {
     /// Target language for OCR processing
     #[arg(long, short = 'l')]
     language: Option<String>,
-
-    /// Model set to use, Overrides default_model_set in config.
-    #[arg(long, short = 'm')]
-    model_set: Option<String>,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
-    let _config = AppConfig::init(args.model_set)?;
+    let _config = AppConfig::init()?;
 
     setup_ort()?;
 
