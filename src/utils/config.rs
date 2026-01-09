@@ -25,14 +25,14 @@ pub struct AppConfig {
     /// Maximum allowed file size in bytes
     pub max_file_size: u64,
 
-    /// Directory path for TensorRT engine cache files
-    pub rt_cache_directory: Box<str>,
-
     /// Directory path for model files
     pub model_directory: Box<str>,
 
     /// Host URL for the server
     pub host_url: Box<str>,
+
+    /// Model set to use
+    pub model_set: Option<Box<str>>,
 }
 
 impl AppConfig {
@@ -72,8 +72,22 @@ impl AppConfig {
     /// # Returns
     ///
     /// Returns a reference to the initialized configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The config file cannot be loaded
+    /// - `model_set` is not specified in the config
     pub fn init() -> Result<&'static Self, ConfigError> {
-        CONFIG_INSTANCE.get_or_try_init(Self::load_default)
+        CONFIG_INSTANCE.get_or_try_init(|| {
+            let config = Self::load_default()?;
+
+            if config.model_set.is_none() {
+                return Err(ConfigError::MissingModelSet);
+            }
+
+            Ok(config)
+        })
     }
 
     /// Get the global configuration instance.
@@ -97,13 +111,25 @@ impl AppConfig {
     pub fn default_config() -> Self {
         Self {
             max_file_size: 1024 * 1024 * 1024, // 1 GB
-            rt_cache_directory: "models/trt_engines".into(),
             model_directory: "models".into(),
             host_url: "0.0.0.0:3000".into(),
+            model_set: Some("edge".into()),
         }
     }
 
-    /// Get the path to a model file within the model directory.
+    /// Get the active model set name.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called before `init()` or if no model set was configured.
+    #[must_use]
+    pub fn model_set(&self) -> &str {
+        self.model_set
+            .as_ref()
+            .expect("model_set not initialized - call init() first")
+    }
+
+    /// Get the path to a model file within the active model set directory.
     ///
     /// # Arguments
     ///
@@ -111,10 +137,25 @@ impl AppConfig {
     ///
     /// # Returns
     ///
-    /// Returns the full path to the model file.
+    /// Returns the full path to a model file
     #[must_use]
     pub fn model_path(&self, relative_path: &str) -> String {
-        format!("{}/{}", self.model_directory, relative_path)
+        format!(
+            "{}/{}/{}",
+            self.model_directory,
+            self.model_set(),
+            relative_path
+        )
+    }
+
+    /// Get the TensorRT cache directory for the active model set.
+    ///
+    /// # Returns
+    ///
+    /// Returns the path: `{model_directory}/{model_set}/trt_engines`
+    #[must_use]
+    pub fn rt_cache_directory(&self) -> String {
+        format!("{}/{}/trt_engines", self.model_directory, self.model_set())
     }
 }
 

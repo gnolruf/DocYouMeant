@@ -14,6 +14,7 @@ use std::env;
 #[command(name = "docyoumeant")]
 #[command(about = "A configurable document understanding pipeline server")]
 struct Args {
+    /// Target language for OCR processing
     #[arg(long, short = 'l')]
     language: Option<String>,
 }
@@ -70,7 +71,7 @@ async fn run_server(language: Option<Language>) -> Result<(), Box<dyn std::error
     Ok(())
 }
 
-/// Preloads all machine learning models into memory.
+/// Preloads all models into memory.
 ///
 /// This function initializes and caches all inference models used by the
 /// document analysis pipeline. Calling this at server startup ensures that

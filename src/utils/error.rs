@@ -22,4 +22,7 @@ pub enum ConfigError {
 
     #[error("Failed to parse configuration JSON: {0}")]
     ParseError(#[from] serde_json::Error),
+
+    #[error("Model set not specified. Set model_set in config")]
+    MissingModelSet,
 }
