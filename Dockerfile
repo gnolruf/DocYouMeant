@@ -83,7 +83,7 @@ RUN mkdir -p /tmp/ort-libs && \
     cp /usr/lib/libonnxruntime.so* /tmp/ort-libs/ && \
     cp /usr/lib/libonnxruntime_providers_*.so* /tmp/ort-libs/ 2>/dev/null || true
 
-# Production runtime with TensorRT support (25.01+ required for Blackwell/RTX 50 series)
+# Production runtime with TensorRT support
 FROM nvcr.io/nvidia/tensorrt:25.01-py3 AS runtime
 RUN apt-get update && apt-get install -y \
     libomp-dev \
