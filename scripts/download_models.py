@@ -72,12 +72,23 @@ class PaddleModelProcessor(ModelProcessor):
         print(f"Successfully processed {self.model_name}")
 
     def _download_file(self, url: str, dest_path: Path) -> None:
-        response = requests.get(url, stream=True)
+        # Use timeouts: (connect_timeout, read_timeout) in seconds
+        response = requests.get(url, stream=True, timeout=(30, 60))
         response.raise_for_status()
+
+        total_size = int(response.headers.get('content-length', 0))
+        downloaded = 0
 
         with open(dest_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
+                downloaded += len(chunk)
+                if total_size > 0:
+                    pct = (downloaded / total_size) * 100
+                    print(f"\r  Progress: {downloaded / (1024*1024):.1f} MB / {total_size / (1024*1024):.1f} MB ({pct:.1f}%)", end="", flush=True)
+                else:
+                    print(f"\r  Downloaded: {downloaded / (1024*1024):.1f} MB", end="", flush=True)
+        print()  # newline after progress
 
     def _extract_tar(self, tar_path: Path, extract_path: Path) -> None:
         with tarfile.open(tar_path) as tar:

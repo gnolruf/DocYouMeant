@@ -1,5 +1,4 @@
-# Base image with TensorRT and CUDA support
-FROM nvcr.io/nvidia/tensorrt:24.10-py3 AS base
+FROM nvcr.io/nvidia/tensorrt:25.01-py3 AS base
 
 # Install system dependencies (LLVM 14 is available by default in Ubuntu 22.04)
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
@@ -76,7 +75,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --de
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 WORKDIR /app
-COPY . . 
+COPY . .
 RUN cargo build --release
 
 # Copy all ONNX Runtime libraries to a single location for easier copying
@@ -84,8 +83,8 @@ RUN mkdir -p /tmp/ort-libs && \
     cp /usr/lib/libonnxruntime.so* /tmp/ort-libs/ && \
     cp /usr/lib/libonnxruntime_providers_*.so* /tmp/ort-libs/ 2>/dev/null || true
 
-# Production runtime
-FROM nvidia/cuda:12.6.2-cudnn-runtime-ubuntu22.04
+# Production runtime with TensorRT support (25.01+ required for Blackwell/RTX 50 series)
+FROM nvcr.io/nvidia/tensorrt:25.01-py3 AS runtime
 RUN apt-get update && apt-get install -y \
     libomp-dev \
     libgomp1 \
