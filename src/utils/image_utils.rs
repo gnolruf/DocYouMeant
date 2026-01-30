@@ -117,15 +117,20 @@ pub fn get_rotate_crop_image(
         });
     }
 
+    let valid_x = min_x.max(0) as u32;
+    let valid_y = min_y.max(0) as u32;
+    let valid_x2 = (max_x as u32).min(src.width());
+    let valid_y2 = (max_y as u32).min(src.height());
+    let valid_w = valid_x2.saturating_sub(valid_x);
+    let valid_h = valid_y2.saturating_sub(valid_y);
+
     let mut cropped_img: RgbImage = ImageBuffer::new(crop_width, crop_height);
 
-    for y in 0..crop_height {
-        for x in 0..crop_width {
-            let src_x = (x as i32 + min_x).clamp(0, src.width() as i32 - 1) as u32;
-            let src_y = (y as i32 + min_y).clamp(0, src.height() as i32 - 1) as u32;
-            let pixel = src.get_pixel(src_x, src_y);
-            cropped_img.put_pixel(x, y, *pixel);
-        }
+    if valid_w > 0 && valid_h > 0 {
+        let cropped_view = imageops::crop_imm(src, valid_x, valid_y, valid_w, valid_h).to_image();
+        let offset_x = (valid_x as i32 - min_x) as i64;
+        let offset_y = (valid_y as i32 - min_y) as i64;
+        imageops::overlay(&mut cropped_img, &cropped_view, offset_x, offset_y);
     }
 
     let adjusted_points: Vec<(f32, f32)> = box_points
@@ -173,15 +178,16 @@ pub fn get_rotate_crop_image(
         Rgb([255u8, 255u8, 255u8]),
     );
 
-    let mut output_img: RgbImage = ImageBuffer::new(output_width, output_height);
-
-    // Copy warped result to output (handling potential size differences)
-    for y in 0..output_height.min(warped.height()) {
-        for x in 0..output_width.min(warped.width()) {
-            let pixel = warped.get_pixel(x, y);
-            output_img.put_pixel(x, y, *pixel);
-        }
-    }
+    let copy_w = output_width.min(warped.width());
+    let copy_h = output_height.min(warped.height());
+    let output_img = if copy_w == output_width && copy_h == output_height {
+        imageops::crop_imm(&warped, 0, 0, output_width, output_height).to_image()
+    } else {
+        let mut img: RgbImage = ImageBuffer::new(output_width, output_height);
+        let cropped = imageops::crop_imm(&warped, 0, 0, copy_w, copy_h).to_image();
+        imageops::overlay(&mut img, &cropped, 0, 0);
+        img
+    };
 
     let is_vertical = (output_height as f32) >= (output_width as f32) * 1.5;
 

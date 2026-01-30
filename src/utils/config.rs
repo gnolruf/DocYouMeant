@@ -4,16 +4,16 @@
 //! Configuration is loaded from a JSON file.
 
 use super::error::ConfigError;
-use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
+use std::sync::OnceLock;
 
 /// Default configuration file path
 pub const DEFAULT_CONFIG_PATH: &str = "config/app_config.json";
 
 /// Global configuration instance
-static CONFIG_INSTANCE: OnceCell<AppConfig> = OnceCell::new();
+static CONFIG_INSTANCE: OnceLock<AppConfig> = OnceLock::new();
 
 /// Application configuration structure.
 ///
@@ -77,15 +77,17 @@ impl AppConfig {
     /// - The config file cannot be loaded
     /// - `model_set` is not specified in the config
     pub fn init() -> Result<&'static Self, ConfigError> {
-        CONFIG_INSTANCE.get_or_try_init(|| {
-            let config = Self::load_default()?;
+        if let Some(config) = CONFIG_INSTANCE.get() {
+            return Ok(config);
+        }
+        let config = Self::load_default()?;
 
-            if config.model_set.is_none() {
-                return Err(ConfigError::MissingModelSet);
-            }
+        if config.model_set.is_none() {
+            return Err(ConfigError::MissingModelSet);
+        }
 
-            Ok(config)
-        })
+        let _ = CONFIG_INSTANCE.set(config);
+        CONFIG_INSTANCE.get().ok_or(ConfigError::MissingModelSet)
     }
 
     /// Get the global configuration instance.

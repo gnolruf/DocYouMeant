@@ -7,7 +7,8 @@
 
 use half::f16;
 use ndarray::{s, Array2, Array4, ArrayView, Ix3};
-use once_cell::sync::OnceCell;
+use std::sync::OnceLock;
+
 use ort::{
     execution_providers::ExecutionProvider,
     memory::{AllocationDevice, AllocatorType, MemoryInfo, MemoryType},
@@ -28,7 +29,7 @@ const MAX_LENGTH: usize = 4096;
 const VOCAB_SIZE: usize = 200_064;
 
 /// Singleton instance for the tokenizer.
-static TOKENIZER_INSTANCE: OnceCell<Tokenizer> = OnceCell::new();
+static TOKENIZER_INSTANCE: OnceLock<Tokenizer> = OnceLock::new();
 
 /// Phi-4-mini-instruct language model for text generation.
 ///
@@ -177,14 +178,23 @@ impl Phi4MiniInference {
     /// * `Ok(&'static Tokenizer)` - Reference to the shared tokenizer
     /// * `Err(InferenceError)` - If the tokenizer file cannot be loaded
     pub fn get_tokenizer() -> Result<&'static Tokenizer, InferenceError> {
-        TOKENIZER_INSTANCE.get_or_try_init(|| {
-            let config = AppConfig::get();
-            let tokenizer_path = config.model_path("tokenizer/phi-4-mini-instruct/tokenizer.json");
-            Tokenizer::from_file(&tokenizer_path).map_err(|e| InferenceError::PreprocessingError {
+        if let Some(tokenizer) = TOKENIZER_INSTANCE.get() {
+            return Ok(tokenizer);
+        }
+        let config = AppConfig::get();
+        let tokenizer_path = config.model_path("tokenizer/phi-4-mini-instruct/tokenizer.json");
+        let tokenizer = Tokenizer::from_file(&tokenizer_path).map_err(|e| {
+            InferenceError::PreprocessingError {
                 operation: "load tokenizer".to_string(),
                 message: format!("Failed to load tokenizer: {e}"),
+            }
+        })?;
+        let _ = TOKENIZER_INSTANCE.set(tokenizer);
+        TOKENIZER_INSTANCE
+            .get()
+            .ok_or_else(|| InferenceError::ProcessingError {
+                message: "Failed to initialize tokenizer singleton".to_string(),
             })
-        })
     }
 
     /// Executes a function with access to the model instance.

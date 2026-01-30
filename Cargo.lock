@@ -879,7 +879,6 @@ dependencies = [
  "lingua",
  "mime",
  "ndarray",
- "once_cell",
  "ort",
  "pdfium-render",
  "rand 0.9.2",

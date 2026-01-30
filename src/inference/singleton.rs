@@ -2,7 +2,7 @@
 //!
 //! This module provides macros to when implementing the singleton
 //! pattern for inference models. Models are wrapped in `Mutex` for thread-safe access
-//! and stored in `OnceCell` for lazy initialization.
+//! and stored in `OnceLock` for lazy initialization.
 //!
 //! # Available Macros
 //!
@@ -13,7 +13,7 @@
 /// Implements the singleton pattern for a simple inference model.
 ///
 /// This macro generates:
-/// - A static `OnceCell<Mutex<$model>>` instance
+/// - A static `OnceLock<Mutex<$model>>` instance
 /// - A `get_or_init()` method for eager initialization
 /// - An `instance()` method for accessing the singleton
 ///
@@ -28,8 +28,8 @@ macro_rules! impl_simple_singleton {
         instance: $instance:ident,
         init: $init:expr
     ) => {
-        static $instance: ::once_cell::sync::OnceCell<::std::sync::Mutex<$model>> =
-            ::once_cell::sync::OnceCell::new();
+        static $instance: ::std::sync::OnceLock<::std::sync::Mutex<$model>> =
+            ::std::sync::OnceLock::new();
 
         impl $model {
             /// Pre-initializes the singleton instance.
@@ -41,10 +41,12 @@ macro_rules! impl_simple_singleton {
             ///
             /// Returns an [`InferenceError`] if model initialization fails.
             pub fn get_or_init() -> Result<(), $crate::inference::InferenceError> {
-                $instance.get_or_try_init(|| {
-                    let init_fn: fn() -> Result<Self, $crate::inference::InferenceError> = $init;
-                    init_fn().map(::std::sync::Mutex::new)
-                })?;
+                if $instance.get().is_some() {
+                    return Ok(());
+                }
+                let init_fn: fn() -> Result<Self, $crate::inference::InferenceError> = $init;
+                let val = init_fn().map(::std::sync::Mutex::new)?;
+                let _ = $instance.set(val);
                 Ok(())
             }
 
@@ -53,10 +55,17 @@ macro_rules! impl_simple_singleton {
             /// Initializes the instance if it hasn't been created yet.
             fn instance(
             ) -> Result<&'static ::std::sync::Mutex<Self>, $crate::inference::InferenceError> {
-                $instance.get_or_try_init(|| {
-                    let init_fn: fn() -> Result<Self, $crate::inference::InferenceError> = $init;
-                    init_fn().map(::std::sync::Mutex::new)
-                })
+                if let Some(val) = $instance.get() {
+                    return Ok(val);
+                }
+                let init_fn: fn() -> Result<Self, $crate::inference::InferenceError> = $init;
+                let val = init_fn().map(::std::sync::Mutex::new)?;
+                let _ = $instance.set(val);
+                $instance
+                    .get()
+                    .ok_or_else(|| $crate::inference::InferenceError::ProcessingError {
+                        message: "Failed to initialize singleton".to_string(),
+                    })
             }
         }
     };
@@ -65,7 +74,7 @@ macro_rules! impl_simple_singleton {
 /// Implements the singleton pattern for a keyed inference model.
 ///
 /// This macro generates:
-/// - A static `OnceCell<RwLock<HashMap<K, Mutex<$model>>>>` for dynamic key-based singletons
+/// - A static `OnceLock<RwLock<HashMap<K, Mutex<$model>>>>` for dynamic key-based singletons
 /// - A `get_or_init(key)` method for eager initialization of a specific key
 /// - An `instance(key)` method for accessing the singleton for a specific key
 ///
@@ -82,9 +91,9 @@ macro_rules! impl_keyed_singleton {
         key_type: $key_type:ty,
         instance: $instance:ident
     ) => {
-        static $instance: ::once_cell::sync::OnceCell<
+        static $instance: ::std::sync::OnceLock<
             ::std::sync::RwLock<::std::collections::HashMap<$key_type, ::std::sync::Mutex<$model>>>,
-        > = ::once_cell::sync::OnceCell::new();
+        > = ::std::sync::OnceLock::new();
 
         impl $model {
             /// Pre-initializes the singleton instance for the specified key.
@@ -191,7 +200,7 @@ macro_rules! impl_keyed_singleton {
 /// Implements the singleton pattern for a mode-based inference model with static variants.
 ///
 /// This macro generates:
-/// - Static `OnceCell<Mutex<$model>>` instances for each mode variant
+/// - Static `OnceLock<Mutex<$model>>` instances for each mode variant
 /// - A `get_or_init(mode)` method for eager initialization of a specific mode
 /// - An `instance(mode)` method for accessing the singleton for a specific mode
 ///
@@ -212,8 +221,8 @@ macro_rules! impl_static_keyed_singleton {
         }
     ) => {
         $(
-            static $instance: ::once_cell::sync::OnceCell<::std::sync::Mutex<$model>> =
-                ::once_cell::sync::OnceCell::new();
+            static $instance: ::std::sync::OnceLock<::std::sync::Mutex<$model>> =
+                ::std::sync::OnceLock::new();
         )+
 
         impl $model {
@@ -233,9 +242,10 @@ macro_rules! impl_static_keyed_singleton {
                 match key {
                     $(
                         <$key_type>::$variant => {
-                            $instance.get_or_try_init(|| {
-                                Self::new(<$key_type>::$variant).map(::std::sync::Mutex::new)
-                            })?;
+                            if $instance.get().is_none() {
+                                let val = Self::new(<$key_type>::$variant).map(::std::sync::Mutex::new)?;
+                                let _ = $instance.set(val);
+                            }
                         }
                     )+
                 }
@@ -249,8 +259,15 @@ macro_rules! impl_static_keyed_singleton {
                 match key {
                     $(
                         <$key_type>::$variant => {
-                            $instance.get_or_try_init(|| {
-                                Self::new(<$key_type>::$variant).map(::std::sync::Mutex::new)
+                            if let Some(val) = $instance.get() {
+                                return Ok(val);
+                            }
+                            let val = Self::new(<$key_type>::$variant).map(::std::sync::Mutex::new)?;
+                            let _ = $instance.set(val);
+                            $instance.get().ok_or_else(|| {
+                                $crate::inference::InferenceError::ProcessingError {
+                                    message: "Failed to initialize singleton".to_string(),
+                                }
                             })
                         }
                     )+
