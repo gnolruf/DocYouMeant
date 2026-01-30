@@ -40,7 +40,6 @@ pub struct AppState {
 /// # Returns
 ///
 /// A configured [`Router`] ready to be served.
-#[must_use]
 pub fn create_app(default_language: Option<Language>) -> Router {
     let state = Arc::new(AppState { default_language });
 

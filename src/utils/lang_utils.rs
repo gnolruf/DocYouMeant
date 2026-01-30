@@ -160,7 +160,15 @@ impl LangUtils {
         let config = AppConfig::get();
         let config_path = config.model_path("ocr_lang_models.json");
         let config_content = fs::read_to_string(config_path)?;
-        let configs: HashMap<String, LanguageModelInfo> = serde_json::from_str(&config_content)?;
+        let configs: HashMap<String, LanguageModelInfo> =
+            serde_json::from_str::<HashMap<String, LanguageModelInfo>>(&config_content)?
+                .into_iter()
+                .map(|(name, mut info)| {
+                    info.model_file = config.model_path(&info.model_file);
+                    info.dict_file = config.shared_path(&info.dict_file);
+                    (name, info)
+                })
+                .collect();
 
         if script_models_only {
             Ok(configs

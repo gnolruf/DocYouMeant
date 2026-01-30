@@ -20,18 +20,40 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Download and install ONNX Runtime with CUDA support
-RUN wget https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-linux-x64-gpu-1.22.0.tgz \
-    && tar -xzf onnxruntime-linux-x64-gpu-1.22.0.tgz \
-    && cp onnxruntime-linux-x64-gpu-1.22.0/lib/libonnxruntime.so* /usr/lib/ \
-    && cp onnxruntime-linux-x64-gpu-1.22.0/lib/libonnxruntime_providers_*.so* /usr/lib/ || true \
-    && rm -rf onnxruntime-linux-x64-gpu-1.22.0*
+# Download and install ONNX Runtime
+ARG TARGETARCH
+RUN ARCH=$(uname -m) && \
+    HAS_CUDA=false && \
+    if command -v nvidia-smi > /dev/null 2>&1 && nvidia-smi > /dev/null 2>&1; then \
+        HAS_CUDA=true; \
+    fi && \
+    if [ "$TARGETARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then \
+        ORT_FILE="onnxruntime-linux-aarch64-1.22.0.tgz"; \
+        ORT_DIR="onnxruntime-linux-aarch64-1.22.0"; \
+    elif [ "$HAS_CUDA" = "true" ]; then \
+        ORT_FILE="onnxruntime-linux-x64-gpu-1.22.0.tgz"; \
+        ORT_DIR="onnxruntime-linux-x64-gpu-1.22.0"; \
+    else \
+        ORT_FILE="onnxruntime-linux-x64-1.22.0.tgz"; \
+        ORT_DIR="onnxruntime-linux-x64-1.22.0"; \
+    fi && \
+    echo "Installing ONNX Runtime: $ORT_FILE (CUDA available: $HAS_CUDA)" && \
+    wget https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/${ORT_FILE} \
+    && tar -xzf ${ORT_FILE} \
+    && cp ${ORT_DIR}/lib/libonnxruntime.so* /usr/lib/ \
+    && cp ${ORT_DIR}/lib/libonnxruntime_providers_*.so* /usr/lib/ 2>/dev/null || true \
+    && rm -rf ${ORT_DIR}*
 
 # Download and install Pdfium binaries
-RUN mkdir -p /tmp/pdfium \
+RUN if [ "$(uname -m)" = "aarch64" ]; then \
+        PDFIUM_ARCH="arm64"; \
+    else \
+        PDFIUM_ARCH="x64"; \
+    fi && \
+    mkdir -p /tmp/pdfium \
     && cd /tmp/pdfium \
-    && wget https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz \
-    && tar -xzf pdfium-linux-x64.tgz \
+    && wget https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-${PDFIUM_ARCH}.tgz \
+    && tar -xzf pdfium-linux-${PDFIUM_ARCH}.tgz \
     && cp lib/libpdfium.so /usr/lib/ \
     && cp -r include/* /usr/include/ \
     && cd / \

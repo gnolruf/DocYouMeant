@@ -194,7 +194,6 @@ pub fn apply_nms(
 /// The expansion distance is calculated as: `area * unclip_ratio / perimeter`
 ///
 /// This ensures that boxes with different aspect ratios expand proportionally.
-#[must_use]
 pub fn unclip_box(
     box_points: &[Coord<i32>; 4],
     unclip_ratio: f32,

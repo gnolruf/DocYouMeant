@@ -25,7 +25,7 @@ class ModelProcessor(ABC):
         self.models_dir = base_dir / "models" / model_set
         self.download_dir = self.models_dir / "download"
         self.onnx_dir = self.models_dir / "onnx"
-        self.dict_dir = self.models_dir / "dict"
+        self.dict_dir = base_dir / "models" / "dict"
         self.tokenizer_dir = self.models_dir / "tokenizer"
         self.trt_engines_dir = self.models_dir / "trt_engines"
 

@@ -45,7 +45,6 @@ impl AppConfig {
     /// # Returns
     ///
     /// Returns the parsed `AppConfig` or a `ConfigError` if loading fails.
-    #[must_use]
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
         let content = fs::read_to_string(path)?;
         let config: AppConfig = serde_json::from_str(&content)?;
@@ -59,7 +58,6 @@ impl AppConfig {
     /// # Returns
     ///
     /// Returns the parsed `AppConfig` or a `ConfigError` if loading fails.
-    #[must_use]
     pub fn load_default() -> Result<Self, ConfigError> {
         Self::from_file(DEFAULT_CONFIG_PATH)
     }
@@ -146,6 +144,22 @@ impl AppConfig {
             self.model_set(),
             relative_path
         )
+    }
+
+    /// Get the path to a shared file in the model directory (not model-set specific).
+    ///
+    /// Used for files shared across model sets, like dictionary files.
+    ///
+    /// # Arguments
+    ///
+    /// * `relative_path` - The relative path to the file (e.g., "dict/en_dict.txt")
+    ///
+    /// # Returns
+    ///
+    /// Returns the full path: `{model_directory}/{relative_path}`
+    #[must_use]
+    pub fn shared_path(&self, relative_path: &str) -> String {
+        format!("{}/{}", self.model_directory, relative_path)
     }
 
     /// Get the TensorRT cache directory for the active model set.

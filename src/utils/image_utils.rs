@@ -84,7 +84,6 @@ pub fn add_image_padding(
 /// * The bounding box has zero width or height.
 /// * The output dimensions would be zero.
 /// * The perspective transformation cannot be computed from the given points.
-#[must_use]
 pub fn get_rotate_crop_image(
     src: &RgbImage,
     box_points: &[(i32, i32)],
@@ -314,7 +313,6 @@ pub fn subtract_mean_normalize(
 ///
 /// Returns an error if any text box extraction fails (see [`get_rotate_crop_image`]
 /// for specific error conditions).
-#[must_use]
 pub fn get_image_parts(
     src: &RgbImage,
     text_boxes: &[TextBox],
@@ -345,7 +343,6 @@ pub fn get_image_parts(
 ///
 /// * `Ok(Array4<f32>)` - Concatenated 4D array `[N, C, H, W]`
 /// * `Err(ImageError)` - If arrays slice is empty or arrays have inconsistent shapes
-#[must_use]
 pub fn stack_arrays(arrays: &[Array4<f32>]) -> Result<Array4<f32>, ImageError> {
     if arrays.is_empty() {
         return Err(ImageError::InvalidInput {

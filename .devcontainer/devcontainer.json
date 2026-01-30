@@ -5,9 +5,9 @@
         "context": "..",
         "target": "development"
     },
-    "runArgs": [
-        "--gpus=all"
-    ],
+    "hostRequirements": {
+        "gpu": "optional"
+    },
     "containerEnv": {
         "DISPLAY": "${localEnv:DISPLAY}",
         "WAYLAND_DISPLAY": "${localEnv:WAYLAND_DISPLAY}",

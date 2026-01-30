@@ -17,11 +17,10 @@ target/
 #.idea/
 
 # Downloaded models and temporary files
-models/download/
-models/onnx/
-models/tokenizer/
-models/trt_engines/
+models/*/
+!models/dict/
 models/ocr_lang_models.json
+
 # Environment files
 .env
 

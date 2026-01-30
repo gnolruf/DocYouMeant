@@ -126,7 +126,7 @@ impl LCNet {
                 ort::execution_providers::TensorRTExecutionProvider::default()
                     .with_device_id(0)
                     .with_engine_cache(true)
-                    .with_engine_cache_path(&config.rt_cache_directory())
+                    .with_engine_cache_path(config.rt_cache_directory())
                     .with_engine_cache_prefix("docyoumeant_")
                     .with_max_workspace_size(5 << 30)
                     .with_fp16(true)
