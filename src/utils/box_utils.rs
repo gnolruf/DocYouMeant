@@ -471,3 +471,629 @@ fn should_come_before(
 
     false
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::text_box::TextBox;
+
+    // calculate_iou Tests
+
+    #[test]
+    fn test_calculate_iou_identical() {
+        let box1 = vec![
+            Coord { x: 0, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 10, y: 10 },
+            Coord { x: 0, y: 10 },
+        ];
+        let iou = calculate_iou(&box1, &box1);
+        assert!((iou - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_calculate_iou_disjoint() {
+        let box1 = vec![
+            Coord { x: 0, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 10, y: 10 },
+            Coord { x: 0, y: 10 },
+        ];
+        let box2 = vec![
+            Coord { x: 20, y: 20 },
+            Coord { x: 30, y: 20 },
+            Coord { x: 30, y: 30 },
+            Coord { x: 20, y: 30 },
+        ];
+        let iou = calculate_iou(&box1, &box2);
+        assert!((iou - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_calculate_iou_partial() {
+        let box1 = vec![
+            Coord { x: 0, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 10, y: 10 },
+            Coord { x: 0, y: 10 },
+        ];
+        let box2 = vec![
+            Coord { x: 5, y: 0 },
+            Coord { x: 15, y: 0 },
+            Coord { x: 15, y: 10 },
+            Coord { x: 5, y: 10 },
+        ];
+        let iou = calculate_iou(&box1, &box2);
+        assert!((iou - 1.0 / 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_calculate_iou_zero_area_box() {
+        let box1 = vec![
+            Coord { x: 0, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 0, y: 0 },
+        ];
+        let box2 = vec![
+            Coord { x: 0, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 10, y: 10 },
+            Coord { x: 0, y: 10 },
+        ];
+        let iou = calculate_iou(&box1, &box2);
+        assert_eq!(iou, 0.0);
+    }
+
+    #[test]
+    fn test_calculate_iou_negative_coordinates() {
+        let box1 = vec![
+            Coord { x: -10, y: -10 },
+            Coord { x: 0, y: -10 },
+            Coord { x: 0, y: 0 },
+            Coord { x: -10, y: 0 },
+        ];
+        let box2 = vec![
+            Coord { x: -5, y: -10 },
+            Coord { x: 5, y: -10 },
+            Coord { x: 5, y: 0 },
+            Coord { x: -5, y: 0 },
+        ];
+        let iou = calculate_iou(&box1, &box2);
+        assert!((iou - 1.0 / 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_calculate_iou_one_inside_other() {
+        let large_box = vec![
+            Coord { x: 0, y: 0 },
+            Coord { x: 20, y: 0 },
+            Coord { x: 20, y: 20 },
+            Coord { x: 0, y: 20 },
+        ];
+        let small_box = vec![
+            Coord { x: 5, y: 5 },
+            Coord { x: 15, y: 5 },
+            Coord { x: 15, y: 15 },
+            Coord { x: 5, y: 15 },
+        ];
+        let iou = calculate_iou(&large_box, &small_box);
+        assert!((iou - 0.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_calculate_iou_touching_boxes() {
+        let box1 = vec![
+            Coord { x: 0, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 10, y: 10 },
+            Coord { x: 0, y: 10 },
+        ];
+        let box2 = vec![
+            Coord { x: 10, y: 0 },
+            Coord { x: 20, y: 0 },
+            Coord { x: 20, y: 10 },
+            Coord { x: 10, y: 10 },
+        ];
+        let iou = calculate_iou(&box1, &box2);
+        assert!(iou < 1e-6);
+    }
+
+    // calculate_overlap Tests
+
+    #[test]
+    fn test_calculate_overlap() {
+        let box1 = vec![
+            Coord { x: 0, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 10, y: 10 },
+            Coord { x: 0, y: 10 },
+        ];
+        let box2 = vec![
+            Coord { x: 5, y: 0 },
+            Coord { x: 15, y: 0 },
+            Coord { x: 15, y: 10 },
+            Coord { x: 5, y: 10 },
+        ];
+        let overlap = calculate_overlap(&box1, &box2);
+        assert!((overlap - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_calculate_overlap_complete_containment() {
+        let small_box = vec![
+            Coord { x: 5, y: 5 },
+            Coord { x: 10, y: 5 },
+            Coord { x: 10, y: 10 },
+            Coord { x: 5, y: 10 },
+        ];
+        let large_box = vec![
+            Coord { x: 0, y: 0 },
+            Coord { x: 20, y: 0 },
+            Coord { x: 20, y: 20 },
+            Coord { x: 0, y: 20 },
+        ];
+        let overlap = calculate_overlap(&small_box, &large_box);
+        assert!((overlap - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_calculate_overlap_zero_area_box() {
+        let zero_area = vec![
+            Coord { x: 5, y: 5 },
+            Coord { x: 5, y: 5 },
+            Coord { x: 5, y: 5 },
+            Coord { x: 5, y: 5 },
+        ];
+        let normal_box = vec![
+            Coord { x: 0, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 10, y: 10 },
+            Coord { x: 0, y: 10 },
+        ];
+        let overlap = calculate_overlap(&zero_area, &normal_box);
+        assert_eq!(overlap, 0.0);
+    }
+
+    #[test]
+    fn test_calculate_overlap_no_intersection() {
+        let box1 = vec![
+            Coord { x: 0, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 10, y: 10 },
+            Coord { x: 0, y: 10 },
+        ];
+        let box2 = vec![
+            Coord { x: 100, y: 100 },
+            Coord { x: 110, y: 100 },
+            Coord { x: 110, y: 110 },
+            Coord { x: 100, y: 110 },
+        ];
+        let overlap = calculate_overlap(&box1, &box2);
+        assert_eq!(overlap, 0.0);
+    }
+
+    // apply_nms Tests
+
+    #[test]
+    fn test_apply_nms() {
+        let box1 = [
+            Coord { x: 0, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 10, y: 10 },
+            Coord { x: 0, y: 10 },
+        ];
+        let box2 = [
+            Coord { x: 1, y: 1 },
+            Coord { x: 11, y: 1 },
+            Coord { x: 11, y: 11 },
+            Coord { x: 1, y: 11 },
+        ];
+        let box3 = [
+            Coord { x: 20, y: 20 },
+            Coord { x: 30, y: 20 },
+            Coord { x: 30, y: 30 },
+            Coord { x: 20, y: 30 },
+        ];
+
+        let detections = vec![(box1, 0, 0.9), (box2, 0, 0.8), (box3, 0, 0.7)];
+        let result = apply_nms(detections, 0.5);
+
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().any(|d| d.2 == 0.9));
+        assert!(result.iter().any(|d| d.2 == 0.7));
+    }
+
+    #[test]
+    fn test_apply_nms_empty() {
+        let detections: Vec<([Coord<i32>; 4], usize, f32)> = vec![];
+        let result = apply_nms(detections, 0.5);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_apply_nms_single_detection() {
+        let box1 = [
+            Coord { x: 0, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 10, y: 10 },
+            Coord { x: 0, y: 10 },
+        ];
+        let detections = vec![(box1, 0, 0.9)];
+        let result = apply_nms(detections, 0.5);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_apply_nms_different_classes() {
+        let box1 = [
+            Coord { x: 0, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 10, y: 10 },
+            Coord { x: 0, y: 10 },
+        ];
+        let box2 = [
+            Coord { x: 1, y: 1 },
+            Coord { x: 11, y: 1 },
+            Coord { x: 11, y: 11 },
+            Coord { x: 1, y: 11 },
+        ];
+        let detections = vec![(box1, 0, 0.9), (box2, 1, 0.85)];
+        let result = apply_nms(detections, 0.5);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_apply_nms_same_scores() {
+        let box1 = [
+            Coord { x: 0, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 10, y: 10 },
+            Coord { x: 0, y: 10 },
+        ];
+        let box2 = [
+            Coord { x: 1, y: 1 },
+            Coord { x: 11, y: 1 },
+            Coord { x: 11, y: 11 },
+            Coord { x: 1, y: 11 },
+        ];
+        let detections = vec![(box1, 0, 0.9), (box2, 0, 0.9)];
+        let result = apply_nms(detections, 0.5);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_apply_nms_threshold_boundary() {
+        let box1 = [
+            Coord { x: 0, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 10, y: 10 },
+            Coord { x: 0, y: 10 },
+        ];
+        let box2 = [
+            Coord { x: 5, y: 0 },
+            Coord { x: 15, y: 0 },
+            Coord { x: 15, y: 10 },
+            Coord { x: 5, y: 10 },
+        ];
+        let detections = vec![(box1, 0, 0.9), (box2, 0, 0.8)];
+        let result = apply_nms(detections, 0.33);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_apply_nms_zero_threshold() {
+        let box1 = [
+            Coord { x: 0, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 10, y: 10 },
+            Coord { x: 0, y: 10 },
+        ];
+        let box2 = [
+            Coord { x: 9, y: 0 },
+            Coord { x: 19, y: 0 },
+            Coord { x: 19, y: 10 },
+            Coord { x: 9, y: 10 },
+        ];
+        let detections = vec![(box1, 0, 0.9), (box2, 0, 0.8)];
+        let result = apply_nms(detections, 0.0);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_apply_nms_one_threshold() {
+        let box1 = [
+            Coord { x: 0, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 10, y: 10 },
+            Coord { x: 0, y: 10 },
+        ];
+        let box2 = [
+            Coord { x: 5, y: 0 },
+            Coord { x: 15, y: 0 },
+            Coord { x: 15, y: 10 },
+            Coord { x: 5, y: 10 },
+        ];
+        let detections = vec![(box1, 0, 0.9), (box2, 0, 0.8)];
+        let result = apply_nms(detections, 1.0);
+        assert_eq!(result.len(), 2);
+    }
+
+    // get_min_boxes Tests
+
+    #[test]
+    fn test_get_min_boxes() {
+        let points = [
+            Coord { x: 0, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 10, y: 10 },
+            Coord { x: 0, y: 10 },
+        ];
+
+        let (sorted_box, max_side) = get_min_boxes(&points);
+        assert!((max_side - 10.0).abs() < 1e-6);
+
+        assert_eq!(sorted_box[0], Coord { x: 0, y: 0 });
+        assert_eq!(sorted_box[1], Coord { x: 10, y: 0 });
+        assert_eq!(sorted_box[2], Coord { x: 10, y: 10 });
+        assert_eq!(sorted_box[3], Coord { x: 0, y: 10 });
+    }
+
+    #[test]
+    fn test_get_min_boxes_rectangle() {
+        let points = [
+            Coord { x: 0, y: 0 },
+            Coord { x: 20, y: 0 },
+            Coord { x: 20, y: 10 },
+            Coord { x: 0, y: 10 },
+        ];
+        let (_, max_side) = get_min_boxes(&points);
+        assert!((max_side - 20.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_get_min_boxes_single_point() {
+        let points = [Coord { x: 5, y: 5 }; 4];
+        let (_, max_side) = get_min_boxes(&points);
+        assert!((max_side - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_get_min_boxes_negative_coords() {
+        let points = [
+            Coord { x: -10, y: -10 },
+            Coord { x: 0, y: -10 },
+            Coord { x: 0, y: 0 },
+            Coord { x: -10, y: 0 },
+        ];
+        let (sorted_box, max_side) = get_min_boxes(&points);
+        assert!((max_side - 10.0).abs() < 1e-6);
+        assert_eq!(sorted_box.len(), 4);
+    }
+
+    // unclip_box Tests
+
+    #[test]
+    fn test_unclip_box() {
+        let points = [
+            Coord { x: 0, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 10, y: 10 },
+            Coord { x: 0, y: 10 },
+        ];
+
+        let result = unclip_box(&points, 2.0).unwrap();
+
+        let min_x = result.iter().map(|p| p.x).min().unwrap();
+        let min_y = result.iter().map(|p| p.y).min().unwrap();
+        let max_x = result.iter().map(|p| p.x).max().unwrap();
+        let max_y = result.iter().map(|p| p.y).max().unwrap();
+
+        assert!(min_x < 0);
+        assert!(min_y < 0);
+        assert!(max_x > 10);
+        assert!(max_y > 10);
+    }
+
+    #[test]
+    fn test_unclip_box_zero_ratio() {
+        let points = [
+            Coord { x: 0, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 10, y: 10 },
+            Coord { x: 0, y: 10 },
+        ];
+
+        let result = unclip_box(&points, 0.0).unwrap();
+
+        let min_x = result.iter().map(|p| p.x).min().unwrap();
+        let max_x = result.iter().map(|p| p.x).max().unwrap();
+        let min_y = result.iter().map(|p| p.y).min().unwrap();
+        let max_y = result.iter().map(|p| p.y).max().unwrap();
+
+        assert!(min_x >= 0);
+        assert!(min_y >= 0);
+        assert!(max_x <= 10);
+        assert!(max_y <= 10);
+    }
+
+    #[test]
+    fn test_unclip_box_large_ratio() {
+        let points = [
+            Coord { x: 10, y: 10 },
+            Coord { x: 20, y: 10 },
+            Coord { x: 20, y: 20 },
+            Coord { x: 10, y: 20 },
+        ];
+
+        let result = unclip_box(&points, 5.0).unwrap();
+
+        let min_x = result.iter().map(|p| p.x).min().unwrap();
+        let max_x = result.iter().map(|p| p.x).max().unwrap();
+
+        assert!(min_x < 5);
+        assert!(max_x > 25);
+    }
+
+    #[test]
+    fn test_unclip_box_negative_coords() {
+        let points = [
+            Coord { x: -10, y: -10 },
+            Coord { x: 0, y: -10 },
+            Coord { x: 0, y: 0 },
+            Coord { x: -10, y: 0 },
+        ];
+
+        let result = unclip_box(&points, 1.5).unwrap();
+
+        let min_x = result.iter().map(|p| p.x).min().unwrap();
+        let min_y = result.iter().map(|p| p.y).min().unwrap();
+
+        assert!(min_x < -10);
+        assert!(min_y < -10);
+    }
+
+    // graph_based_reading_order Tests
+
+    fn make_bounds(coords: [Coord<i32>; 4]) -> Bounds {
+        Bounds::new(coords)
+    }
+
+    #[test]
+    fn test_reading_order_empty() {
+        let boxes: Vec<Bounds> = vec![];
+        let result = graph_based_reading_order(&boxes, Directionality::Ltr);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_reading_order_single() {
+        let boxes = vec![make_bounds([
+            Coord { x: 0, y: 0 },
+            Coord { x: 10, y: 0 },
+            Coord { x: 10, y: 10 },
+            Coord { x: 0, y: 10 },
+        ])];
+        let result = graph_based_reading_order(&boxes, Directionality::Ltr);
+        assert_eq!(result, vec![1]);
+    }
+
+    #[test]
+    fn test_reading_order_left_to_right() {
+        let boxes = vec![
+            make_bounds([
+                Coord { x: 200, y: 0 },
+                Coord { x: 300, y: 0 },
+                Coord { x: 300, y: 50 },
+                Coord { x: 200, y: 50 },
+            ]),
+            make_bounds([
+                Coord { x: 0, y: 0 },
+                Coord { x: 100, y: 0 },
+                Coord { x: 100, y: 50 },
+                Coord { x: 0, y: 50 },
+            ]),
+            make_bounds([
+                Coord { x: 100, y: 0 },
+                Coord { x: 200, y: 0 },
+                Coord { x: 200, y: 50 },
+                Coord { x: 100, y: 50 },
+            ]),
+        ];
+        let result = graph_based_reading_order(&boxes, Directionality::Ltr);
+        assert_eq!(result, vec![2, 3, 1]);
+    }
+
+    #[test]
+    fn test_reading_order_top_to_bottom() {
+        let boxes = vec![
+            make_bounds([
+                Coord { x: 0, y: 100 },
+                Coord { x: 100, y: 100 },
+                Coord { x: 100, y: 150 },
+                Coord { x: 0, y: 150 },
+            ]),
+            make_bounds([
+                Coord { x: 0, y: 200 },
+                Coord { x: 100, y: 200 },
+                Coord { x: 100, y: 250 },
+                Coord { x: 0, y: 250 },
+            ]),
+            make_bounds([
+                Coord { x: 0, y: 0 },
+                Coord { x: 100, y: 0 },
+                Coord { x: 100, y: 50 },
+                Coord { x: 0, y: 50 },
+            ]),
+        ];
+        let result = graph_based_reading_order(&boxes, Directionality::Ltr);
+        assert_eq!(result, vec![3, 1, 2]);
+    }
+
+    #[test]
+    fn test_reading_order_two_columns() {
+        let boxes = vec![
+            make_bounds([
+                Coord { x: 0, y: 0 },
+                Coord { x: 100, y: 0 },
+                Coord { x: 100, y: 30 },
+                Coord { x: 0, y: 30 },
+            ]),
+            make_bounds([
+                Coord { x: 0, y: 40 },
+                Coord { x: 100, y: 40 },
+                Coord { x: 100, y: 70 },
+                Coord { x: 0, y: 70 },
+            ]),
+            make_bounds([
+                Coord { x: 150, y: 0 },
+                Coord { x: 250, y: 0 },
+                Coord { x: 250, y: 30 },
+                Coord { x: 150, y: 30 },
+            ]),
+            make_bounds([
+                Coord { x: 150, y: 40 },
+                Coord { x: 250, y: 40 },
+                Coord { x: 250, y: 70 },
+                Coord { x: 150, y: 70 },
+            ]),
+        ];
+        let result = graph_based_reading_order(&boxes, Directionality::Ltr);
+        assert_eq!(result.len(), 4);
+    }
+
+    #[test]
+    fn test_reading_order_with_text_boxes() {
+        let text_boxes: Vec<TextBox> = vec![
+            TextBox {
+                bounds: Bounds::new([
+                    Coord { x: 100, y: 0 },
+                    Coord { x: 200, y: 0 },
+                    Coord { x: 200, y: 30 },
+                    Coord { x: 100, y: 30 },
+                ]),
+                angle: None,
+                text: Some("Second".into()),
+                box_score: 0.9,
+                text_score: 0.9,
+                span: None,
+            },
+            TextBox {
+                bounds: Bounds::new([
+                    Coord { x: 0, y: 0 },
+                    Coord { x: 100, y: 0 },
+                    Coord { x: 100, y: 30 },
+                    Coord { x: 0, y: 30 },
+                ]),
+                angle: None,
+                text: Some("First".into()),
+                box_score: 0.9,
+                text_score: 0.9,
+                span: None,
+            },
+        ];
+        let bounds: Vec<_> = text_boxes.iter().map(|t| t.bounds).collect();
+        let result = graph_based_reading_order(&bounds, Directionality::Ltr);
+        assert_eq!(result, vec![2, 1]);
+    }
+}

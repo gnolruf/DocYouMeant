@@ -56,3 +56,52 @@ impl TextContent {
         Ok(Box::new(Self { pages: vec![page] }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use crate::document::content::{DocumentType, Modality};
+    use crate::document::Document;
+
+    #[test]
+    fn test_text_content_loading() {
+        let bytes = b"test content\n";
+        let doc = Document::new(bytes, "test.txt").unwrap();
+
+        assert!(doc.content().is_some());
+        assert_eq!(doc.doc_type(), &DocumentType::Text);
+    }
+
+    #[test]
+    fn test_text_content_extraction() {
+        let content = "Hello\nWorld\nTest";
+        let doc = Document::new(content.as_bytes(), "test.txt").unwrap();
+
+        assert_eq!(doc.content().unwrap().get_text(), Some(content.to_string()));
+    }
+
+    #[test]
+    fn test_empty_text_file() {
+        let bytes = b"";
+        let doc = Document::new(bytes, "test.txt").unwrap();
+
+        assert_eq!(doc.content().unwrap().get_text(), Some("".to_string()));
+    }
+
+    #[test]
+    fn test_text_modalities() {
+        let bytes = b"test content";
+        let doc = Document::new(bytes, "test.txt").unwrap();
+
+        let modalities = HashSet::<Modality>::from(doc.doc_type().clone());
+        assert!(modalities.contains(&Modality::Text));
+    }
+
+    #[test]
+    fn test_text_invalid_utf8() {
+        let bytes = b"\xff\xfe\xfd";
+        let result = Document::new(bytes, "test.txt");
+        assert!(result.is_err());
+    }
+}

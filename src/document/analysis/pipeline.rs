@@ -977,3 +977,32 @@ impl AnalysisPipeline {
         Ok(all_qa_results)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_process_mode_from_str_general() {
+        let mode: ProcessMode = "general".into();
+        assert_eq!(mode, ProcessMode::General);
+    }
+
+    #[test]
+    fn test_process_mode_from_str_read() {
+        let mode: ProcessMode = "read".into();
+        assert_eq!(mode, ProcessMode::Read);
+    }
+
+    #[test]
+    fn test_process_mode_from_str_unknown() {
+        let mode: ProcessMode = "unknown".into();
+        assert_eq!(mode, ProcessMode::General);
+
+        let mode2: ProcessMode = "".into();
+        assert_eq!(mode2, ProcessMode::General);
+
+        let mode3: ProcessMode = "analyze".into();
+        assert_eq!(mode3, ProcessMode::General);
+    }
+}

@@ -378,3 +378,143 @@ impl WordContent {
         Ok(Box::new(Self { pages }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::document::Document;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_word_document_with_table_programmatic() {
+        let table = docx_rs::Table::new(vec![
+            docx_rs::TableRow::new(vec![
+                docx_rs::TableCell::new().add_paragraph(
+                    docx_rs::Paragraph::new()
+                        .add_run(docx_rs::Run::new().add_text("Header 1")),
+                ),
+                docx_rs::TableCell::new().add_paragraph(
+                    docx_rs::Paragraph::new()
+                        .add_run(docx_rs::Run::new().add_text("Header 2")),
+                ),
+            ]),
+            docx_rs::TableRow::new(vec![
+                docx_rs::TableCell::new().add_paragraph(
+                    docx_rs::Paragraph::new()
+                        .add_run(docx_rs::Run::new().add_text("Cell 1")),
+                ),
+                docx_rs::TableCell::new().add_paragraph(
+                    docx_rs::Paragraph::new()
+                        .add_run(docx_rs::Run::new().add_text("Cell 2")),
+                ),
+            ]),
+        ]);
+
+        let docx = docx_rs::Docx::new()
+            .add_paragraph(
+                docx_rs::Paragraph::new()
+                    .add_run(docx_rs::Run::new().add_text("Before Table")),
+            )
+            .add_table(table)
+            .add_paragraph(
+                docx_rs::Paragraph::new()
+                    .add_run(docx_rs::Run::new().add_text("After Table")),
+            );
+
+        let mut buffer = Cursor::new(Vec::new());
+        docx.build().pack(&mut buffer).expect("Failed to pack docx");
+        let bytes = buffer.into_inner();
+
+        let doc = Document::new(&bytes, "test_table.docx").unwrap();
+        let content = doc.content().unwrap();
+
+        let text = content.get_text().unwrap();
+        assert!(text.contains("Before Table"));
+        assert!(text.contains("After Table"));
+        assert!(text.contains("Header 1"));
+        assert!(text.contains("Cell 1"));
+
+        let pages = content.get_pages();
+        assert!(!pages.is_empty());
+
+        let first_page = &pages[0];
+        assert!(!first_page.tables.is_empty());
+
+        let table = &first_page.tables[0];
+        assert_eq!(table.row_count, 2);
+        assert_eq!(table.column_count, 2);
+        assert_eq!(table.cells.len(), 4);
+
+        let header_cell = table
+            .cells
+            .iter()
+            .find(|c| c.row_index == 0 && c.column_index == 0);
+        assert!(header_cell.is_some());
+        let header_text = header_cell
+            .unwrap()
+            .content
+            .as_ref()
+            .and_then(|c| c.text.as_ref());
+        assert_eq!(header_text, Some(&"Header 1".to_string()));
+    }
+
+    #[test]
+    fn test_word_document_with_page_breaks_programmatic() {
+        let docx = docx_rs::Docx::new()
+            .add_paragraph(
+                docx_rs::Paragraph::new()
+                    .add_run(docx_rs::Run::new().add_text("Page 1 Content")),
+            )
+            .add_paragraph(
+                docx_rs::Paragraph::new()
+                    .add_run(docx_rs::Run::new().add_break(docx_rs::BreakType::Page)),
+            )
+            .add_paragraph(
+                docx_rs::Paragraph::new()
+                    .add_run(docx_rs::Run::new().add_text("Page 2 Content")),
+            )
+            .add_paragraph(
+                docx_rs::Paragraph::new()
+                    .add_run(docx_rs::Run::new().add_break(docx_rs::BreakType::Page)),
+            )
+            .add_paragraph(
+                docx_rs::Paragraph::new()
+                    .add_run(docx_rs::Run::new().add_text("Page 3 Content")),
+            );
+
+        let mut buffer = Cursor::new(Vec::new());
+        docx.build().pack(&mut buffer).expect("Failed to pack docx");
+        let bytes = buffer.into_inner();
+
+        let doc = Document::new(&bytes, "test_pages.docx").unwrap();
+        let content = doc.content().unwrap();
+
+        let pages = content.get_pages();
+        assert_eq!(pages.len(), 3);
+
+        assert_eq!(pages[0].page_number, 1);
+        assert_eq!(pages[1].page_number, 2);
+        assert_eq!(pages[2].page_number, 3);
+
+        assert!(pages[0].text.as_ref().unwrap().contains("Page 1 Content"));
+        assert!(pages[1].text.as_ref().unwrap().contains("Page 2 Content"));
+        assert!(pages[2].text.as_ref().unwrap().contains("Page 3 Content"));
+    }
+
+    #[test]
+    fn test_word_empty_document() {
+        let docx = docx_rs::Docx::new();
+
+        let mut buffer = Cursor::new(Vec::new());
+        docx.build().pack(&mut buffer).expect("Failed to pack docx");
+        let bytes = buffer.into_inner();
+
+        let doc = Document::new(&bytes, "empty.docx").unwrap();
+        let content = doc.content().unwrap();
+
+        let pages = content.get_pages();
+        assert!(
+            !pages.is_empty(),
+            "Empty document should have at least one page"
+        );
+    }
+}

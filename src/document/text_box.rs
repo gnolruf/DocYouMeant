@@ -162,3 +162,164 @@ pub struct TextBox {
     /// Position of this text within the full document content.
     pub span: Option<DocumentSpan>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_orientation_from_rotation_degrees_cardinal() {
+        assert_eq!(
+            Orientation::from_rotation_degrees(0.0),
+            Some(Orientation::Oriented0)
+        );
+        assert_eq!(
+            Orientation::from_rotation_degrees(90.0),
+            Some(Orientation::Oriented90)
+        );
+        assert_eq!(
+            Orientation::from_rotation_degrees(180.0),
+            Some(Orientation::Oriented180)
+        );
+        assert_eq!(
+            Orientation::from_rotation_degrees(270.0),
+            Some(Orientation::Oriented270)
+        );
+    }
+
+    #[test]
+    fn test_orientation_from_rotation_degrees_negative() {
+        assert_eq!(
+            Orientation::from_rotation_degrees(-90.0),
+            Some(Orientation::Oriented270)
+        );
+        assert_eq!(
+            Orientation::from_rotation_degrees(-180.0),
+            Some(Orientation::Oriented180)
+        );
+        assert_eq!(
+            Orientation::from_rotation_degrees(-270.0),
+            Some(Orientation::Oriented90)
+        );
+    }
+
+    #[test]
+    fn test_orientation_from_rotation_degrees_over_360() {
+        assert_eq!(
+            Orientation::from_rotation_degrees(360.0),
+            Some(Orientation::Oriented0)
+        );
+        assert_eq!(
+            Orientation::from_rotation_degrees(450.0),
+            Some(Orientation::Oriented90)
+        );
+        assert_eq!(
+            Orientation::from_rotation_degrees(720.0),
+            Some(Orientation::Oriented0)
+        );
+    }
+
+    #[test]
+    fn test_orientation_from_rotation_degrees_invalid() {
+        assert_eq!(Orientation::from_rotation_degrees(45.0), None);
+        assert_eq!(Orientation::from_rotation_degrees(135.0), None);
+        assert_eq!(Orientation::from_rotation_degrees(225.0), None);
+    }
+
+    #[test]
+    fn test_orientation_most_common_empty() {
+        let orientations: Vec<Orientation> = vec![];
+        assert_eq!(Orientation::most_common(&orientations), None);
+    }
+
+    #[test]
+    fn test_orientation_most_common_single() {
+        let orientations = vec![Orientation::Oriented90];
+        assert_eq!(
+            Orientation::most_common(&orientations),
+            Some(Orientation::Oriented90)
+        );
+    }
+
+    #[test]
+    fn test_orientation_most_common_majority() {
+        let orientations = vec![
+            Orientation::Oriented0,
+            Orientation::Oriented0,
+            Orientation::Oriented90,
+            Orientation::Oriented0,
+            Orientation::Oriented180,
+        ];
+        assert_eq!(
+            Orientation::most_common(&orientations),
+            Some(Orientation::Oriented0)
+        );
+    }
+
+    #[test]
+    fn test_orientation_most_common_all_same() {
+        let orientations = vec![
+            Orientation::Oriented270,
+            Orientation::Oriented270,
+            Orientation::Oriented270,
+        ];
+        assert_eq!(
+            Orientation::most_common(&orientations),
+            Some(Orientation::Oriented270)
+        );
+    }
+
+    #[test]
+    fn test_document_span_new() {
+        let span = DocumentSpan::new(10, 20);
+        assert_eq!(span.offset, 10);
+        assert_eq!(span.length, 20);
+    }
+
+    #[test]
+    fn test_document_span_zero() {
+        let span = DocumentSpan::new(0, 0);
+        assert_eq!(span.offset, 0);
+        assert_eq!(span.length, 0);
+    }
+
+    #[test]
+    fn test_text_box_with_all_fields() {
+        let text_box = TextBox {
+            bounds: Bounds::new([
+                Coord { x: 0, y: 0 },
+                Coord { x: 100, y: 0 },
+                Coord { x: 100, y: 50 },
+                Coord { x: 0, y: 50 },
+            ]),
+            angle: Some(Orientation::Oriented0),
+            text: Some("Hello World".into()),
+            box_score: 0.95,
+            text_score: 0.92,
+            span: Some(DocumentSpan::new(0, 11)),
+        };
+
+        assert_eq!(text_box.bounds[0], Coord { x: 0, y: 0 });
+        assert_eq!(text_box.angle, Some(Orientation::Oriented0));
+        assert_eq!(text_box.text, Some("Hello World".into()));
+        assert!((text_box.box_score - 0.95).abs() < 1e-6);
+        assert!((text_box.text_score - 0.92).abs() < 1e-6);
+        assert_eq!(text_box.span.unwrap().length, 11);
+    }
+
+    #[test]
+    fn test_text_box_minimal() {
+        let text_box = TextBox {
+            bounds: Bounds::new([Coord { x: 0, y: 0 }; 4]),
+            angle: None,
+            text: None,
+            box_score: 0.0,
+            text_score: 0.0,
+            span: None,
+        };
+
+        assert!(text_box.angle.is_none());
+        assert!(text_box.text.is_none());
+        assert!(text_box.span.is_none());
+    }
+}

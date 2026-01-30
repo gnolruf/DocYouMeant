@@ -69,3 +69,15 @@ impl ImageContent {
         }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::document::Document;
+
+    #[test]
+    fn test_invalid_image() {
+        let bytes = b"not an image";
+        let result = Document::new(bytes, "test.jpg");
+        assert!(result.is_err());
+    }
+}

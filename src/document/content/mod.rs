@@ -419,3 +419,121 @@ pub trait DocumentContent: std::fmt::Debug + Any {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::bounds::Bounds;
+    use crate::document::layout_box::{LayoutBox, LayoutClass};
+    use crate::document::text_box::TextBox;
+    use geo::Coord;
+
+    fn create_text_box(
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        text: Option<&str>,
+        box_score: f32,
+        text_score: f32,
+    ) -> TextBox {
+        TextBox {
+            bounds: Bounds::new([
+                Coord { x, y },
+                Coord { x: x + w, y },
+                Coord { x: x + w, y: y + h },
+                Coord { x, y: y + h },
+            ]),
+            angle: None,
+            text: text.map(String::from),
+            box_score,
+            text_score,
+            span: None,
+        }
+    }
+
+    #[test]
+    fn test_page_content_has_embedded_text_data() {
+        let mut page = PageContent::new(1);
+
+        assert!(!page.has_embedded_text_data());
+
+        page.words = vec![create_text_box(0, 0, 50, 20, Some("Hello"), 1.0, 1.0)];
+        assert!(!page.has_embedded_text_data());
+
+        page.orientation = Some(Orientation::Oriented0);
+        assert!(page.has_embedded_text_data());
+    }
+
+    #[test]
+    fn test_page_content_has_regions() {
+        let mut page = PageContent::new(1);
+
+        assert!(!page.has_regions());
+
+        page.regions = vec![LayoutBox::new(
+            Bounds::new([Coord { x: 0, y: 0 }; 4]),
+            LayoutClass::DocTitle,
+            0.9,
+        )
+        .with_page_number(1)
+        .with_content("Title".into())];
+
+        assert!(page.has_regions());
+    }
+
+    #[test]
+    fn test_document_type_from_extension() {
+        assert_eq!(
+            DocumentType::from_extension("txt"),
+            Some(DocumentType::Text)
+        );
+        assert_eq!(
+            DocumentType::from_extension("docx"),
+            Some(DocumentType::Word)
+        );
+        assert_eq!(DocumentType::from_extension("pdf"), Some(DocumentType::Pdf));
+        assert_eq!(
+            DocumentType::from_extension("xlsx"),
+            Some(DocumentType::Excel)
+        );
+        assert_eq!(DocumentType::from_extension("csv"), Some(DocumentType::Csv));
+        assert_eq!(DocumentType::from_extension("png"), Some(DocumentType::Png));
+        assert_eq!(
+            DocumentType::from_extension("jpg"),
+            Some(DocumentType::Jpeg)
+        );
+        assert_eq!(
+            DocumentType::from_extension("jpeg"),
+            Some(DocumentType::Jpeg)
+        );
+        assert_eq!(
+            DocumentType::from_extension("tiff"),
+            Some(DocumentType::Tiff)
+        );
+        assert_eq!(
+            DocumentType::from_extension("tif"),
+            Some(DocumentType::Tiff)
+        );
+        assert_eq!(DocumentType::from_extension("unknown"), None);
+    }
+
+    #[test]
+    fn test_modality_for_all_types() {
+        let check_modality = |doc_type: DocumentType, expected: Vec<Modality>| {
+            let modalities: HashSet<Modality> = doc_type.into();
+            for m in expected {
+                assert!(modalities.contains(&m));
+            }
+        };
+
+        check_modality(DocumentType::Text, vec![Modality::Text]);
+        check_modality(DocumentType::Word, vec![Modality::Text]);
+        check_modality(DocumentType::Excel, vec![Modality::Text]);
+        check_modality(DocumentType::Csv, vec![Modality::Text]);
+        check_modality(DocumentType::Pdf, vec![Modality::Text, Modality::Image]);
+        check_modality(DocumentType::Png, vec![Modality::Image]);
+        check_modality(DocumentType::Jpeg, vec![Modality::Image]);
+        check_modality(DocumentType::Tiff, vec![Modality::Image]);
+    }
+}

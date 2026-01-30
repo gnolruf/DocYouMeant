@@ -91,3 +91,52 @@ impl CsvContent {
         Ok(Box::new(Self { pages: vec![page] }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::document::content::DocumentType;
+    use crate::document::Document;
+
+    #[test]
+    fn test_csv_content_loading() {
+        let bytes = b"header1,header2\nvalue1,value2\n";
+        let doc = Document::new(bytes, "test.csv").unwrap();
+
+        assert!(doc.content().is_some());
+        assert_eq!(doc.doc_type(), &DocumentType::Csv);
+    }
+
+    #[test]
+    fn test_csv_with_single_column() {
+        let content = "line1\nline2\nline3";
+        let doc = Document::new(content.as_bytes(), "test.csv").unwrap();
+
+        assert_eq!(doc.content().unwrap().get_text(), Some(content.to_string()));
+    }
+
+    #[test]
+    fn test_csv_with_multiple_columns() {
+        let bytes = b"a,b,c\n1,2,3\n4,5,6";
+        let doc = Document::new(bytes, "test.csv").unwrap();
+
+        assert!(doc.content().unwrap().get_text().is_some());
+    }
+
+    #[test]
+    fn test_csv_quoted_fields() {
+        let content = r#"header1,header2
+"value,1",value2
+value3,"value,4""#;
+        let doc = Document::new(content.as_bytes(), "test.csv").unwrap();
+        let text = doc.content().unwrap().get_text().unwrap();
+        assert!(text.contains("value,1"));
+        assert!(text.contains("value,4"));
+    }
+
+    #[test]
+    fn test_csv_empty() {
+        let content = b"";
+        let doc = Document::new(content, "test.csv").unwrap();
+        assert_eq!(doc.content().unwrap().get_text(), Some("".to_string()));
+    }
+}

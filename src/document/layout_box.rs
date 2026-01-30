@@ -356,3 +356,271 @@ impl LayoutBox {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_layout_class_from_id_valid() {
+        assert_eq!(LayoutClass::from_id(0), Some(LayoutClass::ParagraphTitle));
+        assert_eq!(LayoutClass::from_id(1), Some(LayoutClass::Image));
+        assert_eq!(LayoutClass::from_id(2), Some(LayoutClass::Text));
+        assert_eq!(LayoutClass::from_id(10), Some(LayoutClass::DocTitle));
+        assert_eq!(LayoutClass::from_id(14), Some(LayoutClass::Footer));
+        assert_eq!(
+            LayoutClass::from_id(19),
+            Some(LayoutClass::ReferenceContent)
+        );
+    }
+
+    #[test]
+    fn test_layout_class_from_id_invalid() {
+        assert_eq!(LayoutClass::from_id(20), None);
+        assert_eq!(LayoutClass::from_id(100), None);
+        assert_eq!(LayoutClass::from_id(usize::MAX), None);
+    }
+
+    #[test]
+    fn test_layout_box_new() {
+        let bounds = Bounds::new([
+            Coord { x: 0, y: 0 },
+            Coord { x: 100, y: 0 },
+            Coord { x: 100, y: 50 },
+            Coord { x: 0, y: 50 },
+        ]);
+        let region = LayoutBox::new(bounds, LayoutClass::DocTitle, 0.95)
+            .with_page_number(1)
+            .with_content("Test Title".into());
+
+        assert_eq!(region.class, LayoutClass::DocTitle);
+        assert_eq!(region.page_number, Some(1));
+        assert_eq!(region.bounds, bounds);
+        assert_eq!(region.content, Some("Test Title".into()));
+    }
+
+    #[test]
+    fn test_layout_box_is_region() {
+        assert!(LayoutClass::DocTitle.is_region());
+        assert!(LayoutClass::Header.is_region());
+        assert!(LayoutClass::Footer.is_region());
+        assert!(LayoutClass::Number.is_region());
+        assert!(!LayoutClass::Text.is_region());
+        assert!(!LayoutClass::Image.is_region());
+    }
+
+    #[test]
+    fn test_layout_box_creation() {
+        let layout_box = LayoutBox::new(
+            Bounds::new([
+                Coord { x: 10, y: 20 },
+                Coord { x: 110, y: 20 },
+                Coord { x: 110, y: 70 },
+                Coord { x: 10, y: 70 },
+            ]),
+            LayoutClass::Table,
+            0.87,
+        );
+
+        assert_eq!(layout_box.class, LayoutClass::Table);
+        assert!((layout_box.confidence - 0.87).abs() < 1e-6);
+        assert!(layout_box.page_number.is_none());
+        assert!(layout_box.content.is_none());
+    }
+
+    fn create_text_box(
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        text: Option<&str>,
+        box_score: f32,
+        text_score: f32,
+    ) -> TextBox {
+        TextBox {
+            bounds: Bounds::new([
+                Coord { x, y },
+                Coord { x: x + w, y },
+                Coord { x: x + w, y: y + h },
+                Coord { x, y: y + h },
+            ]),
+            angle: None,
+            text: text.map(String::from),
+            box_score,
+            text_score,
+            span: None,
+        }
+    }
+
+    fn create_layout_box(
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        class: LayoutClass,
+        confidence: f32,
+    ) -> LayoutBox {
+        LayoutBox::new(
+            Bounds::new([
+                Coord { x, y },
+                Coord { x: x + w, y },
+                Coord { x: x + w, y: y + h },
+                Coord { x, y: y + h },
+            ]),
+            class,
+            confidence,
+        )
+    }
+
+    #[test]
+    fn test_build_regions_empty() {
+        let layout_boxes: Vec<LayoutBox> = vec![];
+        let text_boxes: Vec<TextBox> = vec![];
+
+        let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
+        assert!(regions.is_empty());
+    }
+
+    #[test]
+    fn test_build_regions_no_matching_layout() {
+        let layout_boxes = vec![
+            create_layout_box(0, 0, 100, 100, LayoutClass::Image, 0.9),
+            create_layout_box(100, 0, 100, 100, LayoutClass::Text, 0.85),
+        ];
+        let text_boxes = vec![create_text_box(
+            0, 0, 100, 100, Some("Image caption"), 0.9, 0.9,
+        )];
+
+        let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
+        assert!(regions.is_empty());
+    }
+
+    #[test]
+    fn test_build_regions_title() {
+        let layout_boxes = vec![create_layout_box(
+            10, 10, 200, 40, LayoutClass::DocTitle, 0.95,
+        )];
+        let text_boxes = vec![create_text_box(
+            10, 10, 200, 40, Some("Document Title"), 0.9, 0.88,
+        )];
+
+        let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
+
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].class, LayoutClass::DocTitle);
+        assert_eq!(regions[0].content, Some("Document Title".into()));
+        assert_eq!(regions[0].page_number, Some(1));
+    }
+
+    #[test]
+    fn test_build_regions_footer() {
+        let layout_boxes =
+            vec![create_layout_box(0, 900, 600, 30, LayoutClass::Footer, 0.9)];
+        let text_boxes = vec![create_text_box(
+            0, 900, 600, 30, Some("Page Footer Text"), 0.85, 0.8,
+        )];
+
+        let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
+
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].class, LayoutClass::Footer);
+    }
+
+    #[test]
+    fn test_build_regions_header() {
+        let layout_boxes =
+            vec![create_layout_box(0, 0, 600, 30, LayoutClass::Header, 0.92)];
+        let text_boxes = vec![create_text_box(
+            0, 0, 600, 30, Some("Header Text"), 0.9, 0.85,
+        )];
+
+        let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
+
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].class, LayoutClass::Header);
+    }
+
+    #[test]
+    fn test_build_regions_page_number() {
+        let layout_boxes = vec![create_layout_box(
+            280, 950, 40, 20, LayoutClass::Number, 0.88,
+        )];
+        let text_boxes = vec![create_text_box(280, 950, 40, 20, Some("42"), 0.95, 0.92)];
+
+        let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
+
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].class, LayoutClass::Number);
+        assert_eq!(regions[0].content, Some("42".into()));
+    }
+
+    #[test]
+    fn test_build_regions_footnote() {
+        let layout_boxes = vec![create_layout_box(
+            50, 800, 500, 60, LayoutClass::Footnote, 0.87,
+        )];
+        let text_boxes = vec![create_text_box(
+            50, 800, 500, 60, Some("This is a footnote reference."), 0.9, 0.88,
+        )];
+
+        let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
+
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].class, LayoutClass::Footnote);
+    }
+
+    #[test]
+    fn test_build_regions_multiple_text_boxes_combined() {
+        let layout_boxes =
+            vec![create_layout_box(0, 0, 300, 50, LayoutClass::DocTitle, 0.9)];
+        let text_boxes = vec![
+            create_text_box(0, 0, 100, 50, Some("Hello"), 0.9, 0.85),
+            create_text_box(100, 0, 100, 50, Some("World"), 0.88, 0.82),
+            create_text_box(200, 0, 100, 50, Some("Title"), 0.92, 0.9),
+        ];
+
+        let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
+
+        assert_eq!(regions.len(), 1);
+        let content = regions[0].content.as_ref().unwrap();
+        assert!(content.contains("Hello"));
+        assert!(content.contains("World"));
+        assert!(content.contains("Title"));
+    }
+
+    #[test]
+    fn test_build_regions_text_box_not_overlapping() {
+        let layout_boxes =
+            vec![create_layout_box(0, 0, 100, 50, LayoutClass::DocTitle, 0.9)];
+        let text_boxes =
+            vec![create_text_box(500, 500, 100, 50, Some("Distant Text"), 0.9, 0.85)];
+
+        let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
+        assert!(regions.is_empty());
+    }
+
+    #[test]
+    fn test_build_regions_mixed_layout_types() {
+        let layout_boxes = vec![
+            create_layout_box(0, 0, 600, 40, LayoutClass::Header, 0.92),
+            create_layout_box(50, 50, 500, 60, LayoutClass::DocTitle, 0.95),
+            create_layout_box(0, 500, 600, 400, LayoutClass::Text, 0.88),
+            create_layout_box(0, 920, 600, 30, LayoutClass::Footer, 0.85),
+        ];
+        let text_boxes = vec![
+            create_text_box(0, 0, 600, 40, Some("Company Name"), 0.9, 0.88),
+            create_text_box(50, 50, 500, 60, Some("Annual Report 2024"), 0.95, 0.93),
+            create_text_box(0, 500, 600, 400, Some("Body text content..."), 0.88, 0.85),
+            create_text_box(0, 920, 600, 30, Some("Confidential"), 0.82, 0.8),
+        ];
+
+        let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
+
+        assert_eq!(regions.len(), 3);
+
+        let classes: Vec<_> = regions.iter().map(|r| r.class).collect();
+        assert!(classes.contains(&LayoutClass::Header));
+        assert!(classes.contains(&LayoutClass::DocTitle));
+        assert!(classes.contains(&LayoutClass::Footer));
+    }
+}

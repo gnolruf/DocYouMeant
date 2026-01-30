@@ -191,3 +191,84 @@ impl Document {
         Ok(result)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_document_with_valid_content() {
+        let bytes = b"test content\n";
+        let doc = Document::new(bytes, "test.txt").unwrap();
+
+        assert_eq!(*doc.doc_type(), DocumentType::Text);
+        assert!(doc.content().is_some());
+    }
+
+    #[test]
+    fn test_new_document_with_invalid_bytes() {
+        let invalid_bytes = b"not a valid docx file";
+        let result = Document::new(invalid_bytes, "test.docx");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_content_access() {
+        let bytes = b"test content\n";
+        let doc = Document::new(bytes, "test.txt").unwrap();
+
+        assert!(doc.content().is_some());
+        assert!(doc.content().unwrap().get_text().is_some());
+    }
+
+    #[test]
+    fn test_invalid_extension() {
+        let bytes = b"test content\n";
+        let result = Document::new(bytes, "test.invalid");
+
+        assert!(matches!(
+            result,
+            Err(DocumentError::UnsupportedFileType { .. })
+        ));
+    }
+
+    #[test]
+    fn test_case_insensitive_extension() {
+        let bytes = b"test content\n";
+        let doc = Document::new(bytes, "test.TXT").unwrap();
+
+        assert_eq!(*doc.doc_type(), DocumentType::Text);
+    }
+
+    #[test]
+    fn test_empty_extension() {
+        let bytes = b"test content";
+        let result = Document::new(bytes, "test");
+
+        assert!(matches!(
+            result,
+            Err(DocumentError::UnsupportedFileType { .. })
+        ));
+    }
+
+    #[test]
+    fn test_invalid_content() {
+        let invalid_bytes = b"not a valid docx file";
+        let result = Document::new(invalid_bytes, "test.docx");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_unsupported_extension() {
+        let bytes = b"content";
+        let result = Document::new(bytes, "test.xyz");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_file_without_extension() {
+        let bytes = b"test content";
+        let result = Document::new(bytes, "");
+        assert!(result.is_err());
+    }
+}

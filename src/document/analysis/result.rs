@@ -250,3 +250,179 @@ pub fn to_analyze_result(
 
     result.with_metadata(metadata)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::bounds::Bounds;
+    use crate::document::layout_box::LayoutClass;
+    use geo::Coord;
+
+    #[test]
+    fn test_analysis_result_new() {
+        let result = AnalysisResult::new("test-process", "text");
+
+        assert_eq!(result.process_id, "test-process");
+        assert_eq!(result.content_format, "text");
+        assert_eq!(result.api_version, env!("CARGO_PKG_VERSION").to_string());
+        assert!(result.content.is_empty());
+        assert!(result.pages.is_empty());
+        assert!(result.regions.is_empty());
+        assert!(result.question_answers.is_empty());
+        assert!(result.metadata.is_none());
+    }
+
+    #[test]
+    fn test_analysis_result_with_content() {
+        let result = AnalysisResult::new("test", "text").with_content("Hello World".into());
+
+        assert_eq!(result.content, "Hello World");
+    }
+
+    #[test]
+    fn test_analysis_result_with_metadata() {
+        let mut metadata = HashMap::new();
+        metadata.insert("key".into(), serde_json::json!("value"));
+        metadata.insert("count".into(), serde_json::json!(42));
+
+        let result = AnalysisResult::new("test", "text").with_metadata(metadata);
+
+        assert!(result.metadata.is_some());
+        let meta = result.metadata.unwrap();
+        assert_eq!(meta.get("key"), Some(&serde_json::json!("value")));
+        assert_eq!(meta.get("count"), Some(&serde_json::json!(42)));
+    }
+
+    #[test]
+    fn test_analysis_result_add_page() {
+        let mut result = AnalysisResult::new("test", "text");
+
+        let page = PageContent::new(1);
+        result.add_page(page);
+
+        assert_eq!(result.pages.len(), 1);
+        assert_eq!(result.pages[0].page_number, 1);
+    }
+
+    #[test]
+    fn test_analysis_result_add_regions() {
+        let mut result = AnalysisResult::new("test", "text");
+
+        let dummy_bounds = Bounds::new([Coord { x: 0, y: 0 }; 4]);
+        let regions = vec![
+            LayoutBox::new(dummy_bounds, LayoutClass::DocTitle, 0.9)
+                .with_page_number(1)
+                .with_content("Title".into()),
+            LayoutBox::new(dummy_bounds, LayoutClass::Footer, 0.85)
+                .with_page_number(1)
+                .with_content("Footer".into()),
+        ];
+        result.add_regions(regions);
+
+        assert_eq!(result.regions.len(), 2);
+    }
+
+    // Mock document content for testing
+    #[derive(Debug)]
+    struct MockDocumentContent {
+        text: Option<String>,
+        pages: Vec<PageContent>,
+    }
+
+    impl DocumentContent for MockDocumentContent {
+        fn page_count(&self) -> usize {
+            self.pages.len()
+        }
+
+        fn get_text(&self) -> Option<String> {
+            self.text.clone()
+        }
+
+        fn get_pages(&self) -> &Vec<PageContent> {
+            &self.pages
+        }
+
+        fn get_pages_mut(&mut self) -> &mut Vec<PageContent> {
+            &mut self.pages
+        }
+    }
+
+    #[test]
+    fn test_to_analyze_result_empty_content() {
+        let content = MockDocumentContent {
+            text: None,
+            pages: vec![],
+        };
+
+        let result = to_analyze_result(&DocumentType::Text, &content, "test-id");
+
+        assert_eq!(result.process_id, "test-id");
+        assert!(result.content.is_empty());
+        assert!(result.pages.is_empty());
+        assert!(result.metadata.is_some());
+    }
+
+    #[test]
+    fn test_to_analyze_result_with_text() {
+        let content = MockDocumentContent {
+            text: Some("Test content".into()),
+            pages: vec![PageContent::new(1)],
+        };
+
+        let result = to_analyze_result(&DocumentType::Pdf, &content, "pdf-test");
+
+        assert_eq!(result.content, "Test content");
+        assert_eq!(result.pages.len(), 1);
+    }
+
+    #[test]
+    fn test_to_analyze_result_with_detected_language() {
+        let mut page = PageContent::new(1);
+        page.detected_language = Some("en".into());
+
+        let content = MockDocumentContent {
+            text: Some("Hello".into()),
+            pages: vec![page],
+        };
+
+        let result = to_analyze_result(&DocumentType::Pdf, &content, "test");
+
+        let metadata = result.metadata.unwrap();
+        assert_eq!(metadata.get("language"), Some(&serde_json::json!("en")));
+    }
+
+    #[test]
+    fn test_to_analyze_result_with_regions() {
+        let mut page = PageContent::new(1);
+        page.regions = vec![LayoutBox::new(
+            Bounds::new([Coord { x: 0, y: 0 }; 4]),
+            LayoutClass::DocTitle,
+            0.9,
+        )
+        .with_page_number(1)
+        .with_content("Title".into())];
+
+        let content = MockDocumentContent {
+            text: None,
+            pages: vec![page],
+        };
+
+        let result = to_analyze_result(&DocumentType::Pdf, &content, "test");
+
+        assert_eq!(result.regions.len(), 1);
+    }
+
+    #[test]
+    fn test_to_analyze_result_metadata_document_type() {
+        let content = MockDocumentContent {
+            text: None,
+            pages: vec![],
+        };
+
+        let result = to_analyze_result(&DocumentType::Word, &content, "test");
+
+        let metadata = result.metadata.unwrap();
+        assert!(metadata.contains_key("document_type"));
+        assert!(metadata.contains_key("page_count"));
+    }
+}
