@@ -691,11 +691,7 @@ impl AnalysisPipeline {
         let document_orientation = Self::get_document_orientation(image, page.orientation)?;
         debug!("Document orientation: {:?}", document_orientation);
 
-        let oriented_image = if document_orientation != Orientation::Oriented0 {
-            image_utils::rotate_image(image, document_orientation)
-        } else {
-            image.clone()
-        };
+        let oriented_image = image_utils::rotate_image(image, document_orientation);
 
         let mut text_lines = Self::detect_text_lines(&oriented_image)?;
         debug!("Found {} text lines", text_lines.len());
@@ -834,11 +830,7 @@ impl AnalysisPipeline {
         let document_orientation = Self::get_document_orientation(image, None)?;
         debug!("Document orientation: {:?}", document_orientation);
 
-        let oriented_image = if document_orientation != Orientation::Oriented0 {
-            image_utils::rotate_image(image, document_orientation)
-        } else {
-            image.clone()
-        };
+        let oriented_image = image_utils::rotate_image(image, document_orientation);
 
         let mut text_lines = Self::detect_text_lines(&oriented_image)?;
         debug!("Found {} text lines", text_lines.len());

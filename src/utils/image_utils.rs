@@ -1,8 +1,10 @@
 //! Utility functions for image processing operations.
 
+use std::borrow::Cow;
+
 use image::{imageops, ImageBuffer, Rgb, RgbImage};
 use imageproc::geometric_transformations::{warp, Interpolation, Projection};
-use ndarray::{Array, Array4, Axis};
+use ndarray::{Array4, Axis};
 
 use crate::document::text_box::Orientation;
 use crate::document::text_box::TextBox;
@@ -199,18 +201,18 @@ pub fn get_rotate_crop_image(
 ///
 /// # Returns
 ///
-/// A new [`RgbImage`] rotated to correct the orientation:
-/// * [`Orientation::Oriented0`] - No rotation (returns a clone).
+/// A [`Cow`] containing the rotated image:
+/// * [`Orientation::Oriented0`] - No rotation (returns borrowed reference, no allocation).
 /// * [`Orientation::Oriented90`] - Rotates 270° (content was rotated 90° clockwise).
 /// * [`Orientation::Oriented180`] - Rotates 180°.
 /// * [`Orientation::Oriented270`] - Rotates 90° (content was rotated 270° clockwise).
 #[must_use]
-pub fn rotate_image(img: &RgbImage, angle_type: Orientation) -> RgbImage {
+pub fn rotate_image(img: &RgbImage, angle_type: Orientation) -> Cow<'_, RgbImage> {
     match angle_type {
-        Orientation::Oriented0 => img.clone(),
-        Orientation::Oriented90 => imageops::rotate270(img),
-        Orientation::Oriented180 => imageops::rotate180(img),
-        Orientation::Oriented270 => imageops::rotate90(img),
+        Orientation::Oriented0 => Cow::Borrowed(img),
+        Orientation::Oriented90 => Cow::Owned(imageops::rotate270(img)),
+        Orientation::Oriented180 => Cow::Owned(imageops::rotate180(img)),
+        Orientation::Oriented270 => Cow::Owned(imageops::rotate90(img)),
     }
 }
 
@@ -234,13 +236,11 @@ pub fn rotate_images_by_angle(part_images: &[RgbImage], text_boxes: &[TextBox]) 
     let mut rotated_images = Vec::with_capacity(part_images.len());
 
     for (img, text_box) in part_images.iter().zip(text_boxes.iter()) {
-        let rotated_img = if let Some(angle) = text_box.angle {
-            rotate_image(img, angle)
-        } else {
-            img.clone()
-        };
+        let rotated_img = text_box
+            .angle
+            .map_or_else(|| Cow::Borrowed(img), |angle| rotate_image(img, angle));
 
-        rotated_images.push(rotated_img);
+        rotated_images.push(rotated_img.into_owned());
     }
 
     rotated_images
@@ -272,20 +272,24 @@ pub fn subtract_mean_normalize(
     let width = img.width() as usize;
     let height = img.height() as usize;
 
-    let mut input = Array::zeros((1, 3, height, width));
+    let raw_pixels = img.as_raw();
 
-    for y in 0..height {
-        for x in 0..width {
-            let pixel = img.get_pixel(x as u32, y as u32);
+    let bias = [
+        mean_values[0] * norm_values[0],
+        mean_values[1] * norm_values[1],
+        mean_values[2] * norm_values[2],
+    ];
 
-            for ch in 0..3 {
-                let pixel_value = pixel.0[ch] as f32;
+    let mut input = Array4::<f32>::zeros((1, 3, height, width));
 
-                let normalized =
-                    (pixel_value * norm_values[ch]) - (mean_values[ch] * norm_values[ch]);
+    for ch in 0..3 {
+        let norm = norm_values[ch];
+        let b = bias[ch];
 
-                input[[0, ch, y, x]] = normalized;
-            }
+        let mut channel_view = input.slice_mut(ndarray::s![0, ch, .., ..]);
+
+        for (i, val) in channel_view.iter_mut().enumerate() {
+            *val = (raw_pixels[i * 3 + ch] as f32) * norm - b;
         }
     }
 

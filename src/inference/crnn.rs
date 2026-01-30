@@ -41,7 +41,7 @@ use geo::Coord;
 /// through the `with_instance` method.
 pub struct Crnn {
     session: Session,
-    keys: Vec<String>,
+    keys: Vec<Box<str>>,
     mean_values: [f32; 3],
     norm_values: [f32; 3],
     dst_height: u32,
@@ -97,19 +97,21 @@ impl Crnn {
                 source,
             })?;
 
-        let mut keys = Vec::new();
         let file =
             File::open(&config.dict_file).map_err(|source| InferenceError::DataFileLoadError {
                 path: config.dict_file.clone().into(),
                 source,
             })?;
         let reader = BufReader::new(file);
-        for line in reader.lines() {
-            keys.push(line.map_err(|source| InferenceError::DataFileParseError {
+        let lines: Result<Vec<_>, _> = reader.lines().collect();
+        let mut keys: Vec<Box<str>> = lines
+            .map_err(|source| InferenceError::DataFileParseError {
                 path: config.dict_file.clone().into(),
                 source,
-            })?);
-        }
+            })?
+            .into_iter()
+            .map(String::into_boxed_str)
+            .collect();
 
         Self::insert_special_characters(&mut keys);
 
@@ -126,9 +128,9 @@ impl Crnn {
     ///
     /// Adds the CTC blank token ("#") at the beginning and a space character
     /// at the end of the dictionary, as required by the CTC decoding algorithm.
-    fn insert_special_characters(keys: &mut Vec<String>) {
-        keys.insert(0, "#".to_string());
-        keys.push(" ".to_string());
+    fn insert_special_characters(keys: &mut Vec<Box<str>>) {
+        keys.insert(0, "#".into());
+        keys.push(" ".into());
     }
 
     /// Recognizes text from images using the singleton instance for the specified language.
@@ -377,7 +379,7 @@ impl Crnn {
                 let char_str = &self.keys[max_index];
                 str_res.push_str(char_str);
 
-                if char_str == " " {
+                if &**char_str == " " {
                     let mut processed = false;
                     if !current_word.is_empty() {
                         if let Some(start_pos) = word_start_pos {

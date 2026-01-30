@@ -389,35 +389,29 @@ mod tests {
         let table = docx_rs::Table::new(vec![
             docx_rs::TableRow::new(vec![
                 docx_rs::TableCell::new().add_paragraph(
-                    docx_rs::Paragraph::new()
-                        .add_run(docx_rs::Run::new().add_text("Header 1")),
+                    docx_rs::Paragraph::new().add_run(docx_rs::Run::new().add_text("Header 1")),
                 ),
                 docx_rs::TableCell::new().add_paragraph(
-                    docx_rs::Paragraph::new()
-                        .add_run(docx_rs::Run::new().add_text("Header 2")),
+                    docx_rs::Paragraph::new().add_run(docx_rs::Run::new().add_text("Header 2")),
                 ),
             ]),
             docx_rs::TableRow::new(vec![
                 docx_rs::TableCell::new().add_paragraph(
-                    docx_rs::Paragraph::new()
-                        .add_run(docx_rs::Run::new().add_text("Cell 1")),
+                    docx_rs::Paragraph::new().add_run(docx_rs::Run::new().add_text("Cell 1")),
                 ),
                 docx_rs::TableCell::new().add_paragraph(
-                    docx_rs::Paragraph::new()
-                        .add_run(docx_rs::Run::new().add_text("Cell 2")),
+                    docx_rs::Paragraph::new().add_run(docx_rs::Run::new().add_text("Cell 2")),
                 ),
             ]),
         ]);
 
         let docx = docx_rs::Docx::new()
             .add_paragraph(
-                docx_rs::Paragraph::new()
-                    .add_run(docx_rs::Run::new().add_text("Before Table")),
+                docx_rs::Paragraph::new().add_run(docx_rs::Run::new().add_text("Before Table")),
             )
             .add_table(table)
             .add_paragraph(
-                docx_rs::Paragraph::new()
-                    .add_run(docx_rs::Run::new().add_text("After Table")),
+                docx_rs::Paragraph::new().add_run(docx_rs::Run::new().add_text("After Table")),
             );
 
         let mut buffer = Cursor::new(Vec::new());
@@ -461,24 +455,21 @@ mod tests {
     fn test_word_document_with_page_breaks_programmatic() {
         let docx = docx_rs::Docx::new()
             .add_paragraph(
-                docx_rs::Paragraph::new()
-                    .add_run(docx_rs::Run::new().add_text("Page 1 Content")),
+                docx_rs::Paragraph::new().add_run(docx_rs::Run::new().add_text("Page 1 Content")),
             )
             .add_paragraph(
                 docx_rs::Paragraph::new()
                     .add_run(docx_rs::Run::new().add_break(docx_rs::BreakType::Page)),
             )
             .add_paragraph(
-                docx_rs::Paragraph::new()
-                    .add_run(docx_rs::Run::new().add_text("Page 2 Content")),
+                docx_rs::Paragraph::new().add_run(docx_rs::Run::new().add_text("Page 2 Content")),
             )
             .add_paragraph(
                 docx_rs::Paragraph::new()
                     .add_run(docx_rs::Run::new().add_break(docx_rs::BreakType::Page)),
             )
             .add_paragraph(
-                docx_rs::Paragraph::new()
-                    .add_run(docx_rs::Run::new().add_text("Page 3 Content")),
+                docx_rs::Paragraph::new().add_run(docx_rs::Run::new().add_text("Page 3 Content")),
             );
 
         let mut buffer = Cursor::new(Vec::new());

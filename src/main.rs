@@ -64,7 +64,7 @@ async fn run_server(language: Option<Language>) -> Result<(), Box<dyn std::error
 
     let socket_addr: std::net::SocketAddr = addr.parse()?;
 
-    initialize_models(language).await?;
+    initialize_models(language)?;
 
     server::start_server(socket_addr, language).await?;
 
@@ -80,9 +80,7 @@ async fn run_server(language: Option<Language>) -> Result<(), Box<dyn std::error
 /// # Arguments
 ///
 /// * `ocr_language` - Optional `Language` enum for the OCR model to preload.
-async fn initialize_models(
-    ocr_language: Option<Language>,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn initialize_models(ocr_language: Option<Language>) -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Preloading models...");
 
     tracing::info!("  Loading DBNet (text detection)...");

@@ -299,7 +299,7 @@ impl DBNet {
     /// * `Ok(Vec<TextBox>)` - Filtered and rescaled text box detections
     /// * `Err(InferenceError)` - If processing fails
     fn get_text_boxes(
-        &mut self,
+        &self,
         threshold_img: &image::GrayImage,
         pred_array: &Array2<f32>,
     ) -> Result<Vec<TextBox>, InferenceError> {

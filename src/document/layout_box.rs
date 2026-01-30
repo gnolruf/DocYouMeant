@@ -488,7 +488,13 @@ mod tests {
             create_layout_box(100, 0, 100, 100, LayoutClass::Text, 0.85),
         ];
         let text_boxes = vec![create_text_box(
-            0, 0, 100, 100, Some("Image caption"), 0.9, 0.9,
+            0,
+            0,
+            100,
+            100,
+            Some("Image caption"),
+            0.9,
+            0.9,
         )];
 
         let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
@@ -498,10 +504,21 @@ mod tests {
     #[test]
     fn test_build_regions_title() {
         let layout_boxes = vec![create_layout_box(
-            10, 10, 200, 40, LayoutClass::DocTitle, 0.95,
+            10,
+            10,
+            200,
+            40,
+            LayoutClass::DocTitle,
+            0.95,
         )];
         let text_boxes = vec![create_text_box(
-            10, 10, 200, 40, Some("Document Title"), 0.9, 0.88,
+            10,
+            10,
+            200,
+            40,
+            Some("Document Title"),
+            0.9,
+            0.88,
         )];
 
         let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
@@ -514,10 +531,15 @@ mod tests {
 
     #[test]
     fn test_build_regions_footer() {
-        let layout_boxes =
-            vec![create_layout_box(0, 900, 600, 30, LayoutClass::Footer, 0.9)];
+        let layout_boxes = vec![create_layout_box(0, 900, 600, 30, LayoutClass::Footer, 0.9)];
         let text_boxes = vec![create_text_box(
-            0, 900, 600, 30, Some("Page Footer Text"), 0.85, 0.8,
+            0,
+            900,
+            600,
+            30,
+            Some("Page Footer Text"),
+            0.85,
+            0.8,
         )];
 
         let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
@@ -528,10 +550,15 @@ mod tests {
 
     #[test]
     fn test_build_regions_header() {
-        let layout_boxes =
-            vec![create_layout_box(0, 0, 600, 30, LayoutClass::Header, 0.92)];
+        let layout_boxes = vec![create_layout_box(0, 0, 600, 30, LayoutClass::Header, 0.92)];
         let text_boxes = vec![create_text_box(
-            0, 0, 600, 30, Some("Header Text"), 0.9, 0.85,
+            0,
+            0,
+            600,
+            30,
+            Some("Header Text"),
+            0.9,
+            0.85,
         )];
 
         let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
@@ -543,7 +570,12 @@ mod tests {
     #[test]
     fn test_build_regions_page_number() {
         let layout_boxes = vec![create_layout_box(
-            280, 950, 40, 20, LayoutClass::Number, 0.88,
+            280,
+            950,
+            40,
+            20,
+            LayoutClass::Number,
+            0.88,
         )];
         let text_boxes = vec![create_text_box(280, 950, 40, 20, Some("42"), 0.95, 0.92)];
 
@@ -557,10 +589,21 @@ mod tests {
     #[test]
     fn test_build_regions_footnote() {
         let layout_boxes = vec![create_layout_box(
-            50, 800, 500, 60, LayoutClass::Footnote, 0.87,
+            50,
+            800,
+            500,
+            60,
+            LayoutClass::Footnote,
+            0.87,
         )];
         let text_boxes = vec![create_text_box(
-            50, 800, 500, 60, Some("This is a footnote reference."), 0.9, 0.88,
+            50,
+            800,
+            500,
+            60,
+            Some("This is a footnote reference."),
+            0.9,
+            0.88,
         )];
 
         let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
@@ -571,8 +614,7 @@ mod tests {
 
     #[test]
     fn test_build_regions_multiple_text_boxes_combined() {
-        let layout_boxes =
-            vec![create_layout_box(0, 0, 300, 50, LayoutClass::DocTitle, 0.9)];
+        let layout_boxes = vec![create_layout_box(0, 0, 300, 50, LayoutClass::DocTitle, 0.9)];
         let text_boxes = vec![
             create_text_box(0, 0, 100, 50, Some("Hello"), 0.9, 0.85),
             create_text_box(100, 0, 100, 50, Some("World"), 0.88, 0.82),
@@ -590,10 +632,16 @@ mod tests {
 
     #[test]
     fn test_build_regions_text_box_not_overlapping() {
-        let layout_boxes =
-            vec![create_layout_box(0, 0, 100, 50, LayoutClass::DocTitle, 0.9)];
-        let text_boxes =
-            vec![create_text_box(500, 500, 100, 50, Some("Distant Text"), 0.9, 0.85)];
+        let layout_boxes = vec![create_layout_box(0, 0, 100, 50, LayoutClass::DocTitle, 0.9)];
+        let text_boxes = vec![create_text_box(
+            500,
+            500,
+            100,
+            50,
+            Some("Distant Text"),
+            0.9,
+            0.85,
+        )];
 
         let regions = LayoutBox::build_regions(1, &layout_boxes, &text_boxes);
         assert!(regions.is_empty());
