@@ -14,15 +14,15 @@ use imageproc::morphology::dilate;
 use imageproc::point::Point;
 use imageproc::point::Point as ImageProcPoint;
 use ndarray::Array2;
-use ort::{inputs, session::Session, value::Value};
+use ort::{inputs, session::builder::PrepackedWeights, session::Session, value::Value};
+use std::sync::OnceLock;
 
 use crate::document::bounds::Bounds;
 use crate::document::TextBox;
 use crate::inference::error::InferenceError;
+use crate::inference::{once_lock_try_init, SessionPool};
 use crate::utils::config::AppConfig;
 use crate::utils::{box_utils, image_utils};
-
-use crate::impl_simple_singleton;
 
 /// Preprocessing metadata produced by [`DBNet::preprocess`].
 ///
@@ -62,11 +62,7 @@ pub struct DBNet {
     unclip_ratio: f32,
 }
 
-impl_simple_singleton!(
-    model: DBNet,
-    instance: DBNET_INSTANCE,
-    init: || Self::new()
-);
+static DBNET_POOL: OnceLock<SessionPool<DBNet>> = OnceLock::new();
 
 impl DBNet {
     /// Path to the DBNet ONNX model file.
@@ -90,7 +86,16 @@ impl DBNet {
     /// - `box_thresh`: 0.3 (probability threshold)
     /// - `box_score_thresh`: 0.5 (minimum confidence)
     /// - `unclip_ratio`: 1.5 (box expansion factor)
-    pub fn new() -> Result<Self, InferenceError> {
+    /// Pre-initializes the session pool.
+    pub fn get_or_init() -> Result<(), InferenceError> {
+        once_lock_try_init(&DBNET_POOL, || {
+            let pool_size = AppConfig::get().inference_pool_size;
+            SessionPool::new(pool_size, |w| Self::new(w))
+        })?;
+        Ok(())
+    }
+
+    fn new(prepacked: &PrepackedWeights) -> Result<Self, InferenceError> {
         let config = AppConfig::get();
         let model_path = config.model_path(Self::MODEL_PATH)?;
 
@@ -100,6 +105,7 @@ impl DBNet {
                 source,
             })?
             .with_inter_threads(Self::NUM_THREADS)?
+            .with_prepacked_weights(prepacked)?
             .commit_from_file(&model_path)
             .map_err(|source| InferenceError::ModelFileLoadError {
                 path: model_path.into(),
@@ -588,10 +594,13 @@ impl DBNet {
     /// * `Ok(Vec<TextBox>)` - Detected text regions with bounding boxes and confidence scores
     /// * `Err(InferenceError)` - If any step of the detection pipeline fails
     pub fn run(image: &RgbImage) -> Result<Vec<TextBox>, InferenceError> {
-        let instance = Self::instance()?;
-        let mut model = instance.lock();
-
-        let (preprocessed, meta) = model.preprocess(image);
-        model.detect(&preprocessed, &meta)
+        let pool = once_lock_try_init(&DBNET_POOL, || {
+            let pool_size = AppConfig::get().inference_pool_size;
+            SessionPool::new(pool_size, |w| Self::new(w))
+        })?;
+        pool.with(|model| {
+            let (preprocessed, meta) = model.preprocess(image);
+            model.detect(&preprocessed, &meta)
+        })
     }
 }

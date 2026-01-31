@@ -9,16 +9,16 @@
 
 use image::{imageops, Rgb, RgbImage};
 use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
-use ort::{inputs, session::Session, value::Value};
+use ort::{inputs, session::builder::PrepackedWeights, session::Session, value::Value};
+use std::sync::OnceLock;
 use tracing::{error, warn};
 
 use crate::document::table::TableType;
 use crate::document::text_box::Orientation;
 use crate::inference::error::InferenceError;
+use crate::inference::{once_lock_try_init, SessionPool};
 use crate::utils::config::AppConfig;
 use crate::utils::image_utils;
-
-use crate::impl_static_keyed_singleton;
 
 /// Operating mode for the LCNet classifier.
 ///
@@ -73,17 +73,27 @@ pub struct LCNet {
     mode: LCNetMode,
 }
 
-impl_static_keyed_singleton!(
-    model: LCNet,
-    key_type: LCNetMode,
-    variants: {
-        TextOrientation => TEXT_ORIENTATION_INSTANCE,
-        DocumentOrientation => DOCUMENT_ORIENTATION_INSTANCE,
-        TableType => TABLE_CLASSIFICATION_INSTANCE,
-    }
-);
+static TEXT_ORIENTATION_POOL: OnceLock<SessionPool<LCNet>> = OnceLock::new();
+static DOCUMENT_ORIENTATION_POOL: OnceLock<SessionPool<LCNet>> = OnceLock::new();
+static TABLE_CLASSIFICATION_POOL: OnceLock<SessionPool<LCNet>> = OnceLock::new();
 
 impl LCNet {
+    fn pool_for(mode: LCNetMode) -> &'static OnceLock<SessionPool<LCNet>> {
+        match mode {
+            LCNetMode::TextOrientation => &TEXT_ORIENTATION_POOL,
+            LCNetMode::DocumentOrientation => &DOCUMENT_ORIENTATION_POOL,
+            LCNetMode::TableType => &TABLE_CLASSIFICATION_POOL,
+        }
+    }
+
+    /// Pre-initializes the session pool for the specified mode.
+    pub fn get_or_init(mode: LCNetMode) -> Result<(), InferenceError> {
+        once_lock_try_init(Self::pool_for(mode), || {
+            let pool_size = AppConfig::get().inference_pool_size;
+            SessionPool::new(pool_size, |w| Self::new(mode, w))
+        })?;
+        Ok(())
+    }
     /// Path to the text orientation classification model.
     const TEXT_ORIENTATION_MODEL_PATH: &'static str = "onnx/text_orientation_classification.onnx";
     /// Path to the document orientation classification model.
@@ -108,7 +118,7 @@ impl LCNet {
     ///
     /// * `Ok(LCNet)` - Initialized classifier ready for inference
     /// * `Err(InferenceError)` - If the model file cannot be loaded
-    pub fn new(mode: LCNetMode) -> Result<Self, InferenceError> {
+    fn new(mode: LCNetMode, prepacked: &PrepackedWeights) -> Result<Self, InferenceError> {
         let config = AppConfig::get();
         let relative_path = match mode {
             LCNetMode::TextOrientation => Self::TEXT_ORIENTATION_MODEL_PATH,
@@ -122,18 +132,17 @@ impl LCNet {
                 path: model_path.clone().into(),
                 source,
             })?
-            .with_execution_providers([
-                ort::execution_providers::TensorRTExecutionProvider::default()
-                    .with_device_id(0)
-                    .with_engine_cache(true)
-                    .with_engine_cache_path(config.rt_cache_directory()?)
-                    .with_engine_cache_prefix("docyoumeant_")
-                    .with_max_workspace_size(5 << 30)
-                    .with_fp16(true)
-                    .with_timing_cache(true)
-                    .build(),
-            ])?
+            .with_execution_providers([ort::ep::TensorRT::default()
+                .with_device_id(0)
+                .with_engine_cache(true)
+                .with_engine_cache_path(config.rt_cache_directory()?)
+                .with_engine_cache_prefix("docyoumeant_")
+                .with_max_workspace_size(5 << 30)
+                .with_fp16(true)
+                .with_timing_cache(true)
+                .build()])?
             .with_inter_threads(Self::NUM_THREADS)?
+            .with_prepacked_weights(prepacked)?
             .commit_from_file(&model_path)
             .map_err(|source| InferenceError::ModelFileLoadError {
                 path: model_path.into(),
@@ -380,55 +389,59 @@ impl LCNet {
         mode: LCNetMode,
         most_angle: bool,
     ) -> Result<Vec<Orientation>, InferenceError> {
-        let instance = Self::instance(mode)?;
-        let mut model = instance.lock();
-        let size = part_imgs.len();
-        let mut angles = Vec::with_capacity(size);
+        let pool = once_lock_try_init(Self::pool_for(mode), || {
+            let pool_size = AppConfig::get().inference_pool_size;
+            SessionPool::new(pool_size, |w| Self::new(mode, w))
+        })?;
+        pool.with(|model| {
+            let size = part_imgs.len();
+            let mut angles = Vec::with_capacity(size);
 
-        for (i, part_img) in part_imgs.iter().enumerate() {
-            if part_img.width() == 0 || part_img.height() == 0 {
-                warn!("Warning: Empty part image at index {i}, skipping");
-                angles.push(Orientation::Oriented0);
-                continue;
-            }
-
-            if part_img.width() < 2 || part_img.height() < 2 {
-                warn!(
-                    "Warning: Part image at index {} is too small ({}x{}), skipping",
-                    i,
-                    part_img.width(),
-                    part_img.height()
-                );
-                angles.push(Orientation::Oriented0);
-                continue;
-            }
-
-            let angle = match model.preprocess(part_img) {
-                Ok((resized_img, is_vertical)) => {
-                    match model.infer_angle(&resized_img, is_vertical) {
-                        Ok(result) => result,
-                        Err(e) => {
-                            error!("Error inferring angle for image {i}: {e:?}");
-                            angles.push(Orientation::Oriented0);
-                            continue;
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!("Error preprocessing image {i}: {e:?}");
+            for (i, part_img) in part_imgs.iter().enumerate() {
+                if part_img.width() == 0 || part_img.height() == 0 {
+                    warn!("Warning: Empty part image at index {i}, skipping");
                     angles.push(Orientation::Oriented0);
                     continue;
                 }
-            };
 
-            angles.push(angle);
-        }
+                if part_img.width() < 2 || part_img.height() < 2 {
+                    warn!(
+                        "Warning: Part image at index {} is too small ({}x{}), skipping",
+                        i,
+                        part_img.width(),
+                        part_img.height()
+                    );
+                    angles.push(Orientation::Oriented0);
+                    continue;
+                }
 
-        if most_angle {
-            Self::apply_most_angle(&mut angles)?;
-        }
+                let angle = match model.preprocess(part_img) {
+                    Ok((resized_img, is_vertical)) => {
+                        match model.infer_angle(&resized_img, is_vertical) {
+                            Ok(result) => result,
+                            Err(e) => {
+                                error!("Error inferring angle for image {i}: {e:?}");
+                                angles.push(Orientation::Oriented0);
+                                continue;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Error preprocessing image {i}: {e:?}");
+                        angles.push(Orientation::Oriented0);
+                        continue;
+                    }
+                };
 
-        Ok(angles)
+                angles.push(angle);
+            }
+
+            if most_angle {
+                Self::apply_most_angle(&mut angles)?;
+            }
+
+            Ok(angles)
+        })
     }
 
     /// Classifies the type of multiple table images.
@@ -445,49 +458,53 @@ impl LCNet {
     /// * `Ok(Vec<TableType>)` - Classification for each table image
     /// * `Err(InferenceError)` - If classification fails
     fn get_table_types(table_imgs: &[RgbImage]) -> Result<Vec<TableType>, InferenceError> {
-        let instance = Self::instance(LCNetMode::TableType)?;
-        let mut model = instance.lock();
-        let size = table_imgs.len();
-        let mut table_types = Vec::with_capacity(size);
+        let pool = once_lock_try_init(Self::pool_for(LCNetMode::TableType), || {
+            let pool_size = AppConfig::get().inference_pool_size;
+            SessionPool::new(pool_size, |w| Self::new(LCNetMode::TableType, w))
+        })?;
+        pool.with(|model| {
+            let size = table_imgs.len();
+            let mut table_types = Vec::with_capacity(size);
 
-        for (i, table_img) in table_imgs.iter().enumerate() {
-            if table_img.width() == 0 || table_img.height() == 0 {
-                warn!("Warning: Empty table image at index {i}, skipping");
-                table_types.push(TableType::Wired); // Default to wired
-                continue;
-            }
+            for (i, table_img) in table_imgs.iter().enumerate() {
+                if table_img.width() == 0 || table_img.height() == 0 {
+                    warn!("Warning: Empty table image at index {i}, skipping");
+                    table_types.push(TableType::Wired); // Default to wired
+                    continue;
+                }
 
-            if table_img.width() < 2 || table_img.height() < 2 {
-                warn!(
-                    "Warning: Table image at index {} is too small ({}x{}), skipping",
-                    i,
-                    table_img.width(),
-                    table_img.height()
-                );
-                table_types.push(TableType::Wired); // Default to wired
-                continue;
-            }
+                if table_img.width() < 2 || table_img.height() < 2 {
+                    warn!(
+                        "Warning: Table image at index {} is too small ({}x{}), skipping",
+                        i,
+                        table_img.width(),
+                        table_img.height()
+                    );
+                    table_types.push(TableType::Wired); // Default to wired
+                    continue;
+                }
 
-            let table_type = match model.preprocess(table_img) {
-                Ok((resized_img, _)) => match model.infer_table_type(&resized_img) {
-                    Ok(result) => result,
+                let table_type = match model.preprocess(table_img) {
+                    Ok((resized_img, _)) => match model.infer_table_type(&resized_img) {
+                        Ok(result) => result,
+                        Err(e) => {
+                            error!("Error inferring table type for image {i}: {e:?}");
+                            table_types.push(TableType::Wired);
+                            continue;
+                        }
+                    },
                     Err(e) => {
-                        error!("Error inferring table type for image {i}: {e:?}");
+                        error!("Error preprocessing table image {i}: {e:?}");
                         table_types.push(TableType::Wired);
                         continue;
                     }
-                },
-                Err(e) => {
-                    error!("Error preprocessing table image {i}: {e:?}");
-                    table_types.push(TableType::Wired);
-                    continue;
-                }
-            };
+                };
 
-            table_types.push(table_type);
-        }
+                table_types.push(table_type);
+            }
 
-        Ok(table_types)
+            Ok(table_types)
+        })
     }
 
     /// Preprocesses an image for classification.

@@ -2,5 +2,6 @@
   "max_file_size": 1073741824,
   "model_directory": "models",
   "host_url": "0.0.0.0:3000",
-  "model_set": "edge"
+  "model_set": "edge",
+  "inference_pool_size": 2
 }

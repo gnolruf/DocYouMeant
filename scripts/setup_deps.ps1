@@ -9,7 +9,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$ORT_VERSION = "1.22.0"
+$ORT_VERSION = "1.23.2"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 $DepsDir = Join-Path $ProjectRoot "deps"

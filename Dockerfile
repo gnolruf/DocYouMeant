@@ -28,17 +28,17 @@ RUN ARCH=$(uname -m) && \
         HAS_CUDA=true; \
     fi && \
     if [ "$TARGETARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then \
-        ORT_FILE="onnxruntime-linux-aarch64-1.22.0.tgz"; \
-        ORT_DIR="onnxruntime-linux-aarch64-1.22.0"; \
+        ORT_FILE="onnxruntime-linux-aarch64-1.23.2.tgz"; \
+        ORT_DIR="onnxruntime-linux-aarch64-1.23.2"; \
     elif [ "$HAS_CUDA" = "true" ]; then \
-        ORT_FILE="onnxruntime-linux-x64-gpu-1.22.0.tgz"; \
-        ORT_DIR="onnxruntime-linux-x64-gpu-1.22.0"; \
+        ORT_FILE="onnxruntime-linux-x64-gpu-1.23.2.tgz"; \
+        ORT_DIR="onnxruntime-linux-x64-gpu-1.23.2"; \
     else \
-        ORT_FILE="onnxruntime-linux-x64-1.22.0.tgz"; \
-        ORT_DIR="onnxruntime-linux-x64-1.22.0"; \
+        ORT_FILE="onnxruntime-linux-x64-1.23.2.tgz"; \
+        ORT_DIR="onnxruntime-linux-x64-1.23.2"; \
     fi && \
     echo "Installing ONNX Runtime: $ORT_FILE (CUDA available: $HAS_CUDA)" && \
-    wget https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/${ORT_FILE} \
+    wget https://github.com/microsoft/onnxruntime/releases/download/v1.23.2/${ORT_FILE} \
     && tar -xzf ${ORT_FILE} \
     && cp ${ORT_DIR}/lib/libonnxruntime.so* /usr/lib/ \
     && cp ${ORT_DIR}/lib/libonnxruntime_providers_*.so* /usr/lib/ 2>/dev/null || true \

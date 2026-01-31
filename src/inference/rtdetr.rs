@@ -11,16 +11,16 @@
 use geo::Coord;
 use image::RgbImage;
 use ndarray::Array2;
-use ort::{inputs, session::Session, value::Value};
+use ort::{inputs, session::builder::PrepackedWeights, session::Session, value::Value};
+use std::sync::OnceLock;
 
 use crate::document::bounds::Bounds;
 use crate::document::table::TableCell;
 use crate::document::{LayoutBox, LayoutClass};
 use crate::inference::error::InferenceError;
+use crate::inference::{once_lock_try_init, SessionPool};
 use crate::utils::config::AppConfig;
 use crate::utils::{box_utils, image_utils};
-
-use crate::impl_static_keyed_singleton;
 
 /// Operating mode for the RT-DETR detector.
 ///
@@ -87,17 +87,27 @@ pub struct RtDetr {
     mode: RtDetrMode,
 }
 
-impl_static_keyed_singleton!(
-    model: RtDetr,
-    key_type: RtDetrMode,
-    variants: {
-        Layout => LAYOUT_DETECTION_INSTANCE,
-        WiredTableCell => WIRED_TABLE_CELL_DETECTION_INSTANCE,
-        WirelessTableCell => WIRELESS_TABLE_CELL_DETECTION_INSTANCE,
-    }
-);
+static LAYOUT_POOL: OnceLock<SessionPool<RtDetr>> = OnceLock::new();
+static WIRED_TABLE_POOL: OnceLock<SessionPool<RtDetr>> = OnceLock::new();
+static WIRELESS_TABLE_POOL: OnceLock<SessionPool<RtDetr>> = OnceLock::new();
 
 impl RtDetr {
+    fn pool_for(mode: RtDetrMode) -> &'static OnceLock<SessionPool<RtDetr>> {
+        match mode {
+            RtDetrMode::Layout => &LAYOUT_POOL,
+            RtDetrMode::WiredTableCell => &WIRED_TABLE_POOL,
+            RtDetrMode::WirelessTableCell => &WIRELESS_TABLE_POOL,
+        }
+    }
+
+    /// Pre-initializes the session pool for the specified mode.
+    pub fn get_or_init(mode: RtDetrMode) -> Result<(), InferenceError> {
+        once_lock_try_init(Self::pool_for(mode), || {
+            let pool_size = AppConfig::get().inference_pool_size;
+            SessionPool::new(pool_size, |w| Self::new(mode, w))
+        })?;
+        Ok(())
+    }
     /// Path to the layout detection model.
     const LAYOUT_DETECTION_MODEL_PATH: &'static str = "onnx/layout_detection.onnx";
     /// Path to the wired table cell detection model.
@@ -122,7 +132,7 @@ impl RtDetr {
     ///
     /// * `Ok(RtDetr)` - Initialized detector ready for inference
     /// * `Err(InferenceError)` - If the model file cannot be loaded
-    pub fn new(mode: RtDetrMode) -> Result<Self, InferenceError> {
+    fn new(mode: RtDetrMode, prepacked: &PrepackedWeights) -> Result<Self, InferenceError> {
         let config = AppConfig::get();
         let relative_path = match mode {
             RtDetrMode::Layout => Self::LAYOUT_DETECTION_MODEL_PATH,
@@ -136,18 +146,17 @@ impl RtDetr {
                 path: model_path.clone().into(),
                 source,
             })?
-            .with_execution_providers([
-                ort::execution_providers::TensorRTExecutionProvider::default()
-                    .with_device_id(0)
-                    .with_engine_cache(true)
-                    .with_engine_cache_path(config.rt_cache_directory()?)
-                    .with_engine_cache_prefix("docyoumeant_")
-                    .with_max_workspace_size(5 << 30)
-                    .with_fp16(true)
-                    .with_timing_cache(true)
-                    .build(),
-            ])?
+            .with_execution_providers([ort::ep::TensorRT::default()
+                .with_device_id(0)
+                .with_engine_cache(true)
+                .with_engine_cache_path(config.rt_cache_directory()?)
+                .with_engine_cache_prefix("docyoumeant_")
+                .with_max_workspace_size(5 << 30)
+                .with_fp16(true)
+                .with_timing_cache(true)
+                .build()])?
             .with_inter_threads(Self::NUM_THREADS)?
+            .with_prepacked_weights(prepacked)?
             .commit_from_file(&model_path)
             .map_err(|source| InferenceError::ModelFileLoadError {
                 path: model_path.into(),
@@ -442,10 +451,13 @@ impl RtDetr {
     ///   - `WiredTableCell` / `WirelessTableCell` → `RtDetrResult::TableCells`
     /// * `Err(InferenceError)` - If any step fails
     pub fn run(image: &RgbImage, mode: RtDetrMode) -> Result<RtDetrResult, InferenceError> {
-        let instance = Self::instance(mode)?;
-        let mut model = instance.lock();
-
-        let (preprocessed, meta) = model.preprocess(image);
-        model.detect(&preprocessed, &meta)
+        let pool = once_lock_try_init(Self::pool_for(mode), || {
+            let pool_size = AppConfig::get().inference_pool_size;
+            SessionPool::new(pool_size, |w| Self::new(mode, w))
+        })?;
+        pool.with(|model| {
+            let (preprocessed, meta) = model.preprocess(image);
+            model.detect(&preprocessed, &meta)
+        })
     }
 }

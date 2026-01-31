@@ -33,6 +33,9 @@ pub struct AppConfig {
 
     /// Model set to use
     pub model_set: Option<Box<str>>,
+
+    /// Number of pooled sessions per model for concurrent inference
+    pub inference_pool_size: usize,
 }
 
 impl AppConfig {
@@ -114,6 +117,7 @@ impl AppConfig {
             model_directory: "models".into(),
             host_url: "0.0.0.0:3000".into(),
             model_set: Some("edge".into()),
+            inference_pool_size: 1,
         }
     }
 

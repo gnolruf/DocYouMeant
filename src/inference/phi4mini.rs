@@ -10,16 +10,16 @@ use ndarray::{s, Array2, Array4, ArrayView, Ix3};
 use std::sync::OnceLock;
 
 use ort::{
-    execution_providers::ExecutionProvider,
+    ep::ExecutionProvider,
     memory::{AllocationDevice, AllocatorType, MemoryInfo, MemoryType},
-    session::Session,
+    session::{builder::PrepackedWeights, Session},
     value::Value,
 };
 use std::path::Path;
 use tokenizers::Tokenizer;
 
-use crate::impl_simple_singleton;
 use crate::inference::error::InferenceError;
+use crate::inference::{once_lock_try_init, SessionPool};
 use crate::utils::config::AppConfig;
 
 /// Maximum number of tokens to generate in a single response.
@@ -49,11 +49,7 @@ pub struct Phi4MiniInference {
     use_cuda: bool,
 }
 
-impl_simple_singleton!(
-    model: Phi4MiniInference,
-    instance: PHI4MINI_INSTANCE,
-    init: || Phi4MiniInference::new()
-);
+static PHI4MINI_POOL: OnceLock<SessionPool<Phi4MiniInference>> = OnceLock::new();
 
 impl Phi4MiniInference {
     /// Creates a new Phi-4-mini-instruct inference instance.
@@ -65,14 +61,18 @@ impl Phi4MiniInference {
     ///
     /// * `Ok(Phi4MiniInference)` - Initialized model ready for generation
     /// * `Err(InferenceError)` - If model files are missing or cannot be loaded
-    pub fn new() -> Result<Self, InferenceError> {
+    /// Pre-initializes the session pool (pool size = 1 for this large model).
+    pub fn get_or_init() -> Result<(), InferenceError> {
+        once_lock_try_init(&PHI4MINI_POOL, || SessionPool::new(1, |w| Self::new(w)))?;
+        Ok(())
+    }
+
+    fn new(prepacked: &PrepackedWeights) -> Result<Self, InferenceError> {
         let config = AppConfig::get();
         let model_path_str = config.model_path("onnx")?;
         let model_dir = Path::new(&model_path_str);
 
-        let use_cuda = ort::execution_providers::CUDAExecutionProvider::default()
-            .is_available()
-            .unwrap_or(false);
+        let use_cuda = ort::ep::CUDA::default().is_available().unwrap_or(false);
 
         let model_variant = if use_cuda { "gpu" } else { "cpu" };
         let model_path =
@@ -100,6 +100,7 @@ impl Phi4MiniInference {
                 path: model_path.clone(),
                 source,
             })?
+            .with_prepacked_weights(prepacked)?
             .commit_from_file(&model_path)
             .map_err(|source| InferenceError::ModelFileLoadError {
                 path: model_path,
@@ -152,16 +153,10 @@ impl Phi4MiniInference {
         })
     }
 
-    /// Pre-initializes both model and tokenizer singletons.
+    /// Pre-initializes both model session pool and tokenizer.
     ///
     /// Call this method during application startup to eagerly load the model
-    /// and tokenizer. This wraps the macro-generated initialization and also
-    /// initializes the tokenizer singleton.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` - Model and tokenizer successfully initialized
-    /// * `Err(InferenceError)` - If initialization fails
+    /// and tokenizer.
     pub fn init_all() -> Result<(), InferenceError> {
         Self::get_or_init()?;
         Self::get_tokenizer()?;
@@ -199,30 +194,14 @@ impl Phi4MiniInference {
 
     /// Executes a function with access to the model instance.
     ///
-    /// This is the primary way to interact with the model. It handles singleton
-    /// initialization and mutex locking automatically.
-    ///
-    /// # Type Parameters
-    ///
-    /// * `F` - Function type that takes `&mut Phi4MiniInference` and returns `Result<R, InferenceError>`
-    /// * `R` - Return type of the function
-    ///
-    /// # Arguments
-    ///
-    /// * `f` - Function to execute with the model instance
-    ///
-    /// # Returns
-    ///
-    /// The result of the provided function.
+    /// This is the primary way to interact with the model. It handles pool
+    /// initialization and lock acquisition automatically.
     pub fn with_instance<F, R>(f: F) -> Result<R, InferenceError>
     where
         F: FnOnce(&mut Phi4MiniInference) -> Result<R, InferenceError>,
     {
-        let instance = Self::instance()?;
-
-        let mut model = instance.lock();
-
-        f(&mut model)
+        let pool = once_lock_try_init(&PHI4MINI_POOL, || SessionPool::new(1, |w| Self::new(w)))?;
+        pool.with(f)
     }
 
     /// Formats a prompt using the Phi-4 chat template.

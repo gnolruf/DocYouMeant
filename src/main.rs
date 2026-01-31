@@ -49,11 +49,9 @@ fn setup_ort() -> Result<(), Box<dyn std::error::Error>> {
     let dylib_path =
         env::var("ORT_DYLIB_PATH").unwrap_or_else(|_| "/usr/lib/libonnxruntime.so".to_string());
 
-    ort::init_from(dylib_path)
-        .with_execution_providers([ort::execution_providers::CUDAExecutionProvider::default()
-            .with_device_id(0)
-            .build()])
-        .commit()?;
+    ort::init_from(dylib_path)?
+        .with_execution_providers([ort::ep::CUDA::default().with_device_id(0).build()])
+        .commit();
 
     Ok(())
 }
@@ -81,6 +79,8 @@ async fn run_server(language: Option<Language>) -> Result<(), Box<dyn std::error
 ///
 /// * `ocr_language` - Optional `Language` enum for the OCR model to preload.
 fn initialize_models(ocr_language: Option<Language>) -> Result<(), Box<dyn std::error::Error>> {
+    let config = AppConfig::get();
+    tracing::info!("Inference pool size: {}", config.inference_pool_size);
     tracing::info!("Preloading models...");
 
     tracing::info!("  Loading DBNet (text detection)...");

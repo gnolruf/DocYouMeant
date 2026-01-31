@@ -10,12 +10,13 @@ use std::io::{BufRead, BufReader};
 
 use image::{imageops, Rgb, RgbImage};
 use lingua::Language;
-use ort::{inputs, session::Session, value::Value};
+use ort::{inputs, session::builder::PrepackedWeights, session::Session, value::Value};
+use std::sync::OnceLock;
 
 use crate::document::bounds::Bounds;
 use crate::document::text_box::TextBox;
-use crate::impl_keyed_singleton;
 use crate::inference::error::InferenceError;
+use crate::inference::KeyedSessionPool;
 use crate::utils::image_utils;
 use crate::utils::lang_utils::{Directionality, LangUtils};
 use geo::Coord;
@@ -47,11 +48,11 @@ pub struct Crnn {
     dst_height: u32,
 }
 
-impl_keyed_singleton!(
-    model: Crnn,
-    key_type: String,
-    instance: CRNN_INSTANCES
-);
+static CRNN_POOLS: OnceLock<KeyedSessionPool<String, Crnn>> = OnceLock::new();
+
+fn crnn_pools() -> &'static KeyedSessionPool<String, Crnn> {
+    CRNN_POOLS.get_or_init(KeyedSessionPool::new)
+}
 
 impl Crnn {
     /// Number of threads for ONNX Runtime inter-op parallelism.
@@ -77,7 +78,23 @@ impl Crnn {
     /// - The specified model file is not supported
     /// - The model file cannot be loaded
     /// - The dictionary file cannot be read or parsed
-    pub fn new(model_file: String) -> Result<Self, InferenceError> {
+    /// Pre-initializes the session pool for the specified model file key.
+    pub fn get_or_init(model_file: String) -> Result<(), InferenceError> {
+        let pool_size = crate::utils::config::AppConfig::get().inference_pool_size;
+        let key = model_file.clone();
+        crnn_pools().get_or_init(key, pool_size, |w| Self::new(model_file.clone(), w))
+    }
+
+    /// Executes a closure with exclusive access to the model for the given key.
+    pub fn with_instance<F, R>(key: String, f: F) -> Result<R, InferenceError>
+    where
+        F: FnOnce(&mut Crnn) -> Result<R, InferenceError>,
+    {
+        Self::get_or_init(key.clone())?;
+        crnn_pools().with(&key, f)
+    }
+
+    fn new(model_file: String, prepacked: &PrepackedWeights) -> Result<Self, InferenceError> {
         let config = LangUtils::get_model_info_by_file(&model_file).ok_or_else(|| {
             InferenceError::ModelFileLoadError {
                 path: format!("Unsupported model file: {model_file}").into(),
@@ -91,6 +108,7 @@ impl Crnn {
                 source,
             })?
             .with_inter_threads(Self::NUM_THREADS)?
+            .with_prepacked_weights(prepacked)?
             .commit_from_file(&config.model_file)
             .map_err(|source| InferenceError::ModelFileLoadError {
                 path: config.model_file.clone().into(),
