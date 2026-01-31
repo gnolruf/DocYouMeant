@@ -100,8 +100,11 @@ impl<K: Eq + Hash + Clone, T> KeyedSessionPool<K, T> {
                 return Ok(());
             }
         }
-        let pool = SessionPool::new(pool_size, init)?;
-        self.map.write().entry(key).or_insert(pool);
+        let mut write = self.map.write();
+        if let std::collections::hash_map::Entry::Vacant(entry) = write.entry(key) {
+            let pool = SessionPool::new(pool_size, init)?;
+            entry.insert(pool);
+        }
         Ok(())
     }
 

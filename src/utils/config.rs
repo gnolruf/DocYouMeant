@@ -206,7 +206,8 @@ mod tests {
             "max_file_size": 52428800,
             "model_directory": "models",
             "host_url": "127.0.0.1:8080",
-            "model_set": "edge"
+            "model_set": "edge",
+            "inference_pool_size": 1
         }"#;
 
         let config: AppConfig = serde_json::from_str(json).unwrap();
@@ -224,7 +225,8 @@ mod tests {
             "max_file_size": 104857600,
             "model_directory": "models",
             "host_url": "0.0.0.0:3000",
-            "model_set": "server"
+            "model_set": "server",
+            "inference_pool_size": 1
         }"#;
         temp_file.write_all(json.as_bytes()).unwrap();
 
@@ -251,7 +253,8 @@ mod tests {
         let json = r#"{
             "max_file_size": 52428800,
             "model_directory": "models",
-            "host_url": "127.0.0.1:8080"
+            "host_url": "127.0.0.1:8080",
+            "inference_pool_size": 1
         }"#;
 
         let config: AppConfig = serde_json::from_str(json).unwrap();
@@ -283,7 +286,8 @@ mod tests {
             "max_file_size": 1000,
             "model_directory": "test/models",
             "host_url": "localhost:9000",
-            "model_set": "custom"
+            "model_set": "custom",
+            "inference_pool_size": 1
         }"#;
 
         let config: AppConfig = serde_json::from_str(json).unwrap();

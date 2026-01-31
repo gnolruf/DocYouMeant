@@ -81,8 +81,9 @@ impl Crnn {
     /// Pre-initializes the session pool for the specified model file key.
     pub fn get_or_init(model_file: String) -> Result<(), InferenceError> {
         let pool_size = crate::utils::config::AppConfig::get().inference_pool_size;
-        let key = model_file.clone();
-        crnn_pools().get_or_init(key, pool_size, |w| Self::new(model_file.clone(), w))
+        crnn_pools().get_or_init(model_file.clone(), pool_size, |w| {
+            Self::new(model_file.clone(), w)
+        })
     }
 
     /// Executes a closure with exclusive access to the model for the given key.
@@ -96,9 +97,8 @@ impl Crnn {
 
     fn new(model_file: String, prepacked: &PrepackedWeights) -> Result<Self, InferenceError> {
         let config = LangUtils::get_model_info_by_file(&model_file).ok_or_else(|| {
-            InferenceError::ModelFileLoadError {
-                path: format!("Unsupported model file: {model_file}").into(),
-                source: ort::Error::new(format!("Unsupported model file: {model_file}")),
+            InferenceError::UnsupportedModel {
+                name: model_file.clone(),
             }
         })?;
 
@@ -175,9 +175,8 @@ impl Crnn {
     ) -> Result<(Vec<TextBox>, Directionality), InferenceError> {
         let model_info = LangUtils::get_language_model_info(language).ok_or_else(|| {
             let lang_str = LangUtils::map_from_lingua_language(language);
-            InferenceError::ModelFileLoadError {
-                path: format!("Unsupported language: {lang_str}").into(),
-                source: ort::Error::new(format!("Unsupported language: {lang_str}")),
+            InferenceError::UnsupportedModel {
+                name: lang_str.into_owned(),
             }
         })?;
         let directionality = model_info.directionality;
@@ -389,7 +388,7 @@ impl Crnn {
             let (max_index, max_value) = output_data[start..stop]
                 .iter()
                 .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .max_by(|(_, a), (_, b)| a.total_cmp(b))
                 .unwrap_or((0, &0.0));
 
             if max_index > 0 && max_index < self.keys.len() && !(i > 0 && max_index == last_index) {

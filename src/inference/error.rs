@@ -55,4 +55,7 @@ pub enum InferenceError {
 
     #[error("Processing error: {message}")]
     ProcessingError { message: String },
+
+    #[error("Unsupported model: {name}")]
+    UnsupportedModel { name: String },
 }

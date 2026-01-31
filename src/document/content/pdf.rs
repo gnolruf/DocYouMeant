@@ -10,12 +10,53 @@
 //! This module uses the `pdfium-render` crate, which requires the PDFium
 //! library to be available at runtime (either bundled or system-installed).
 
+use std::sync::OnceLock;
+
+use parking_lot::Mutex;
 use pdfium_render::prelude::*;
 
 use super::super::bounds::Bounds;
 use super::super::error::DocumentError;
 use super::super::text_box::{Coord, Orientation, TextBox};
 use super::{DocumentContent, PageContent};
+
+/// Wrapper to make `Pdfium` usable in a `static` via `OnceLock`.
+///
+/// `Pdfium` internally stores a `Box<dyn PdfiumLibraryBindings>` which is
+/// not `Send + Sync`. Wrapping it in a `Mutex` satisfies both bounds while
+/// still avoiding repeated `dlopen`/`dlsym` calls on every PDF load.
+struct PdfiumHolder(Mutex<Pdfium>);
+
+// The underlying library bindings are function pointers loaded once and
+// remain valid for the lifetime of the process.
+unsafe impl Send for PdfiumHolder {}
+unsafe impl Sync for PdfiumHolder {}
+
+/// Global cached Pdfium library binding.
+static PDFIUM_HOLDER: OnceLock<PdfiumHolder> = OnceLock::new();
+
+/// Executes a closure with access to the shared Pdfium instance, initializing it on first access.
+fn with_pdfium<F, R>(f: F) -> Result<R, DocumentError>
+where
+    F: FnOnce(&Pdfium) -> Result<R, DocumentError>,
+{
+    let holder = if let Some(h) = PDFIUM_HOLDER.get() {
+        h
+    } else {
+        let bindings = Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name())
+            .or_else(|_| Pdfium::bind_to_system_library())
+            .map_err(|source| DocumentError::PdfLoadError { source })?;
+        let instance = Pdfium::new(bindings);
+        let _ = PDFIUM_HOLDER.set(PdfiumHolder(Mutex::new(instance)));
+        PDFIUM_HOLDER
+            .get()
+            .ok_or_else(|| DocumentError::ProcessingError {
+                message: "Failed to initialize Pdfium singleton".to_string(),
+            })?
+    };
+    let guard = holder.0.lock();
+    f(&guard)
+}
 
 /// Default rendering resolution in dots per inch for PDF pages.
 const PDF_RENDER_DPI: f32 = 300.0;
@@ -63,17 +104,13 @@ impl PdfContent {
     /// - The PDF file is corrupted or password-protected
     /// - Page rendering fails
     pub fn load(bytes: &[u8]) -> Result<Box<dyn DocumentContent>, DocumentError> {
-        let pdfium = Pdfium::new(
-            Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name())
-                .or_else(|_| Pdfium::bind_to_system_library())
-                .map_err(|source| DocumentError::PdfLoadError { source })?,
-        );
+        with_pdfium(|pdfium_instance| {
+            let document = pdfium_instance
+                .load_pdf_from_byte_slice(bytes, None)
+                .map_err(|source| DocumentError::PdfLoadError { source })?;
 
-        let document = pdfium
-            .load_pdf_from_byte_slice(bytes, None)
-            .map_err(|source| DocumentError::PdfLoadError { source })?;
-
-        Self::process_document(&document)
+            Self::process_document(&document)
+        })
     }
 
     /// Processes all pages of a PDF document.
@@ -163,6 +200,17 @@ impl PdfContent {
         let stride = width as usize * 4;
         let mut rgb_data = Vec::with_capacity((width * height * 3) as usize);
 
+        let expected_len = height as usize * stride;
+        if raw_bytes.len() < expected_len {
+            tracing::warn!(
+                "PDF bitmap buffer smaller than expected: got {} bytes, expected {} for {}x{} page",
+                raw_bytes.len(),
+                expected_len,
+                width,
+                height,
+            );
+        }
+
         for y in 0..height {
             for x in 0..width {
                 let pixel_index = y as usize * stride + x as usize * 4;
@@ -173,6 +221,17 @@ impl PdfContent {
                     rgb_data.push(r);
                     rgb_data.push(g);
                     rgb_data.push(b);
+                } else {
+                    tracing::warn!(
+                        "Skipping pixel at ({}, {}): index {} out of bounds (buffer len {})",
+                        x,
+                        y,
+                        pixel_index,
+                        raw_bytes.len(),
+                    );
+                    rgb_data.push(255);
+                    rgb_data.push(255);
+                    rgb_data.push(255);
                 }
             }
         }

@@ -12,7 +12,6 @@ use imageproc::drawing::draw_polygon_mut;
 use imageproc::geometry::min_area_rect;
 use imageproc::morphology::dilate;
 use imageproc::point::Point;
-use imageproc::point::Point as ImageProcPoint;
 use ndarray::Array2;
 use ort::{inputs, session::builder::PrepackedWeights, session::Session, value::Value};
 use std::sync::OnceLock;
@@ -550,9 +549,9 @@ impl DBNet {
 
         let mut mask: image::GrayImage = ImageBuffer::new(mask_width, mask_height);
 
-        let polygon_points: Vec<ImageProcPoint<i32>> = boxes
+        let polygon_points: Vec<Point<i32>> = boxes
             .iter()
-            .map(|point| ImageProcPoint::new(point.x - clamp_min_x, point.y - clamp_min_y))
+            .map(|point| Point::new(point.x - clamp_min_x, point.y - clamp_min_y))
             .collect();
 
         draw_polygon_mut(&mut mask, &polygon_points, Luma([255u8]));

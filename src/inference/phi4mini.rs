@@ -392,7 +392,7 @@ impl Phi4MiniInference {
                     .slice(s![0, -1, ..VOCAB_SIZE])
                     .iter()
                     .enumerate()
-                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                    .max_by(|(_, a), (_, b)| a.total_cmp(b))
                     .ok_or_else(|| InferenceError::PredictionError {
                         operation: "find max logit".to_string(),
                         message: "Empty logits tensor".to_string(),
@@ -473,6 +473,19 @@ impl Phi4MiniInference {
         let mut past_key_values = self.init_past_key_values()?;
         let (output_mem_info, cpu_mem_info) = self.create_memory_info()?;
 
+        // Pre-compute KV cache name strings to avoid repeated allocations in the generation loop.
+        let past_kv_names: Vec<(String, String)> = (0..32)
+            .map(|i| {
+                (
+                    format!("past_key_values.{i}.key"),
+                    format!("past_key_values.{i}.value"),
+                )
+            })
+            .collect();
+        let present_kv_names: Vec<(String, String)> = (0..32)
+            .map(|i| (format!("present.{i}.key"), format!("present.{i}.value")))
+            .collect();
+
         let mut generated_tokens: Vec<i64> = Vec::new();
         let mut current_position = input_ids.shape()[1] as i64;
 
@@ -531,23 +544,17 @@ impl Phi4MiniInference {
                     source: e,
                 })?;
 
-            for i in 0..32 {
+            for (i, (key_name, value_name)) in past_kv_names.iter().enumerate() {
                 binding
-                    .bind_input(
-                        format!("past_key_values.{}.key", i),
-                        &past_key_values[i * 2],
-                    )
+                    .bind_input(key_name.as_str(), &past_key_values[i * 2])
                     .map_err(|e| InferenceError::ModelExecutionError {
-                        operation: format!("bind past_key_values.{}.key", i),
+                        operation: format!("bind {key_name}"),
                         source: e,
                     })?;
                 binding
-                    .bind_input(
-                        format!("past_key_values.{}.value", i),
-                        &past_key_values[i * 2 + 1],
-                    )
+                    .bind_input(value_name.as_str(), &past_key_values[i * 2 + 1])
                     .map_err(|e| InferenceError::ModelExecutionError {
-                        operation: format!("bind past_key_values.{}.value", i),
+                        operation: format!("bind {value_name}"),
                         source: e,
                     })?;
             }
@@ -559,17 +566,17 @@ impl Phi4MiniInference {
                     source: e,
                 })?;
 
-            for i in 0..32 {
+            for (key_name, value_name) in &present_kv_names {
                 binding
-                    .bind_output_to_device(format!("present.{}.key", i), &output_mem_info)
+                    .bind_output_to_device(key_name.as_str(), &output_mem_info)
                     .map_err(|e| InferenceError::ModelExecutionError {
-                        operation: format!("bind present.{}.key", i),
+                        operation: format!("bind {key_name}"),
                         source: e,
                     })?;
                 binding
-                    .bind_output_to_device(format!("present.{}.value", i), &output_mem_info)
+                    .bind_output_to_device(value_name.as_str(), &output_mem_info)
                     .map_err(|e| InferenceError::ModelExecutionError {
-                        operation: format!("bind present.{}.value", i),
+                        operation: format!("bind {value_name}"),
                         source: e,
                     })?;
             }
@@ -589,18 +596,15 @@ impl Phi4MiniInference {
                     })?;
 
             let mut new_past_key_values = Vec::with_capacity(64);
-            for i in 0..32 {
-                let key_name = format!("present.{}.key", i);
-                let value_name = format!("present.{}.value", i);
-
-                new_past_key_values.push(outputs.remove(&key_name).ok_or_else(|| {
+            for (key_name, value_name) in &present_kv_names {
+                new_past_key_values.push(outputs.remove(key_name.as_str()).ok_or_else(|| {
                     InferenceError::ProcessingError {
-                        message: format!("Missing output '{}'", key_name),
+                        message: format!("Missing output '{key_name}'"),
                     }
                 })?);
-                new_past_key_values.push(outputs.remove(&value_name).ok_or_else(|| {
+                new_past_key_values.push(outputs.remove(value_name.as_str()).ok_or_else(|| {
                     InferenceError::ProcessingError {
-                        message: format!("Missing output '{}'", value_name),
+                        message: format!("Missing output '{value_name}'"),
                     }
                 })?);
             }

@@ -323,7 +323,7 @@ impl LCNet {
                 let max_index = scores
                     .iter()
                     .enumerate()
-                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                    .max_by(|(_, a), (_, b)| a.total_cmp(b))
                     .map(|(index, _)| index)
                     .unwrap_or(0);
 

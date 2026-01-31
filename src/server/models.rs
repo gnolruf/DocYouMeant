@@ -5,11 +5,34 @@
 //! and response formatting.
 
 use base64::{engine::general_purpose::STANDARD, Engine};
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 use super::error::ValidationError;
 use crate::document::AnalysisResult;
 use crate::utils::config::AppConfig;
+
+/// Serde helper to (de)serialize `Bytes` as a JSON string.
+mod bytes_as_string {
+    use bytes::Bytes;
+    use serde::{self, Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(bytes: &Bytes, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let s = std::str::from_utf8(bytes).map_err(serde::ser::Error::custom)?;
+        serializer.serialize_str(s)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Bytes, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(Bytes::from(s))
+    }
+}
 
 /// Characters that are forbidden in filenames.
 ///
@@ -29,7 +52,8 @@ pub struct AnalysisRequest {
     ///
     /// The document (PDF, image, etc.) must be encoded using standard Base64.
     /// Maximum decoded size is 1 GB.
-    pub data: String,
+    #[serde(with = "bytes_as_string")]
+    pub data: Bytes,
 
     /// Filename with extension (e.g., `"document.pdf"`).
     ///
@@ -104,7 +128,7 @@ impl AnalysisRequest {
         }
 
         let decoded = STANDARD
-            .decode(&self.data)
+            .decode(self.data.as_ref())
             .map_err(|e| ValidationError::InvalidBase64(e.to_string()))?;
 
         if decoded.len() > max_file_size {
