@@ -7,7 +7,7 @@ import argparse
 import sys
 from pathlib import Path
 from abc import ABC, abstractmethod
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from huggingface_hub import snapshot_download
 
 
@@ -91,7 +91,7 @@ class PaddleModelProcessor(ModelProcessor):
 
     def _extract_tar(self, tar_path: Path, extract_path: Path) -> None:
         with tarfile.open(tar_path) as tar:
-            tar.extractall(path=extract_path)
+            tar.extractall(path=extract_path, filter="data")
 
     def _convert_to_onnx(self, model_dir: Path, output_file: Path, model_filename: str, params_filename: str) -> None:
         cmd = [
@@ -128,9 +128,9 @@ class HuggingFaceModelProcessor(ModelProcessor):
         print(f"\nProcessing {variant_name.upper()} variant...")
 
         if variant_name == "default":
-             temp_output_dir = self.download_dir / self.config['output_dir']
+            temp_output_dir = self.download_dir / self.config['output_dir']
         else:
-             temp_output_dir = self.download_dir / f"{self.config['output_dir']}_{variant_name}"
+            temp_output_dir = self.download_dir / f"{self.config['output_dir']}_{variant_name}"
 
         self._download_huggingface_model(
             self.config['repo'],
@@ -143,19 +143,9 @@ class HuggingFaceModelProcessor(ModelProcessor):
         if onnx_files:
             print(f"Moving {variant_name.upper()} ONNX files to {self.model_set}/onnx/...")
 
-            if "onnx_subdir" in self.config:
-                if variant_name == "default":
-                    model_onnx_dir = self.onnx_dir / self.config['onnx_subdir']
-                else:
-                    model_onnx_dir = self.onnx_dir / self.config['onnx_subdir'] / variant_name
-                model_onnx_dir.mkdir(parents=True, exist_ok=True)
-                print(f"  Created subdirectory: {model_onnx_dir.relative_to(self.onnx_dir)}")
-            else:
-                if variant_name == "default":
-                    model_onnx_dir = self.onnx_dir
-                else:
-                    model_onnx_dir = self.onnx_dir / variant_name
-                    model_onnx_dir.mkdir(parents=True, exist_ok=True)
+            base = self.onnx_dir / self.config['onnx_subdir'] if "onnx_subdir" in self.config else self.onnx_dir
+            model_onnx_dir = base if variant_name == "default" else base / variant_name
+            model_onnx_dir.mkdir(parents=True, exist_ok=True)
 
             source_subdir = variant.get('source_subdir', '')
             for onnx_file in onnx_files:
@@ -176,11 +166,11 @@ class HuggingFaceModelProcessor(ModelProcessor):
 
         tokenizer_source = self.config.get('tokenizer_source_subdir')
         if tokenizer_source is None:
-             variants = self.config.get("variants", [])
-             if variants:
-                 tokenizer_source = variants[0].get('source_subdir', '')
-             else:
-                 tokenizer_source = self.config.get("source_subdir", "")
+            variants = self.config.get("variants", [])
+            if variants:
+                tokenizer_source = variants[0].get('source_subdir', '')
+            else:
+                tokenizer_source = self.config.get("source_subdir", "")
 
         temp_tokenizer_dir = self.download_dir / f"{self.config['output_dir']}_tokenizer"
 
@@ -215,7 +205,6 @@ class HuggingFaceModelProcessor(ModelProcessor):
             repo_id=repo,
             allow_patterns=include_pattern,
             local_dir=str(output_dir),
-            local_dir_use_symlinks=False
         )
 
 
@@ -235,15 +224,9 @@ def generate_ocr_lang_models_config(models_dir: Path, models: dict) -> None:
             directionality = model_info.get("directionality", "ltr")
 
             for language in model_info["languages"]:
-                if language not in ocr_lang_models:
-                    ocr_lang_models[language] = {
-                        "name": language,
-                        "model_file": f"onnx/{model_info['output']}",
-                        "dict_file": f"dict/{model_info['dict_filename']}",
-                        "is_script_model": is_script_model,
-                        "directionality": directionality
-                    }
-                elif not is_script_model and ocr_lang_models[language].get("is_script_model", False):
+                if language not in ocr_lang_models or (
+                    not is_script_model and ocr_lang_models[language].get("is_script_model", False)
+                ):
                     ocr_lang_models[language] = {
                         "name": language,
                         "model_file": f"onnx/{model_info['output']}",
@@ -259,7 +242,7 @@ def generate_ocr_lang_models_config(models_dir: Path, models: dict) -> None:
     print(f"Generated language models config: {config_file}")
 
 
-def filter_models_by_language(models: dict, target_language: str = None) -> dict:
+def filter_models_by_language(models: dict, target_language: Optional[str] = None) -> dict:
     if target_language is None:
         return models
 
@@ -301,7 +284,6 @@ def main():
 
     base_dir = Path(__file__).parent.parent
 
-    # Load model set config from config/models/{model_set}.json
     models_config_path = base_dir / "config" / "models" / f"{args.model_set}.json"
     if not models_config_path.exists():
         available_configs = list((base_dir / "config" / "models").glob("*.json"))

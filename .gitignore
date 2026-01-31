@@ -24,6 +24,9 @@ models/ocr_lang_models.json
 # Environment files
 .env
 
+# Python virtual environment
+.venv/
+
 # Generated visualizations and test outputs
 layout_result.png
 text_result.png
