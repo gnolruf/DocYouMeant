@@ -24,6 +24,19 @@ use crate::utils::{box_utils, image_utils};
 
 use crate::impl_simple_singleton;
 
+/// Preprocessing metadata produced by [`DBNet::preprocess`].
+///
+/// Contains the dimensional information needed to rescale detected boxes
+/// back to original image coordinates.
+pub(crate) struct DBNetPreprocessResult {
+    /// Original input image dimensions `[width, height]`
+    src_dimensions: [i32; 2],
+    /// Processed image dimensions after padding `[width, height]`
+    dst_dimensions: [i32; 2],
+    /// Applied padding `[top, bottom, left, right]`
+    padding: [i32; 4],
+}
+
 /// Text detection model using Differentiable Binarization Network.
 ///
 /// `DBNet` detects text regions in document images by producing a probability map
@@ -39,9 +52,6 @@ use crate::impl_simple_singleton;
 /// - `box_thresh`: Threshold for binary mask creation (probability cutoff)
 /// - `box_score_thresh`: Minimum average confidence score to keep a detection
 /// - `unclip_ratio`: Expansion ratio for detected boxes (compensates for shrinkage)
-/// - `src_dimensions`: Original input image dimensions `[width, height]`
-/// - `dst_dimensions`: Processed image dimensions after padding `[width, height]`
-/// - `padding`: Applied padding `[top, bottom, left, right]`
 pub struct DBNet {
     session: Session,
     mean_values: [f32; 3],
@@ -50,9 +60,6 @@ pub struct DBNet {
     box_thresh: f32,
     box_score_thresh: f32,
     unclip_ratio: f32,
-    src_dimensions: [i32; 2], // [width, height]
-    dst_dimensions: [i32; 2], // [width, height]
-    padding: [i32; 4],        // [top, bottom, left, right]
 }
 
 impl_simple_singleton!(
@@ -85,7 +92,7 @@ impl DBNet {
     /// - `unclip_ratio`: 1.5 (box expansion factor)
     pub fn new() -> Result<Self, InferenceError> {
         let config = AppConfig::get();
-        let model_path = config.model_path(Self::MODEL_PATH);
+        let model_path = config.model_path(Self::MODEL_PATH)?;
 
         let session = Session::builder()
             .map_err(|source| InferenceError::ModelFileLoadError {
@@ -111,9 +118,6 @@ impl DBNet {
             box_thresh: 0.3,
             box_score_thresh: 0.5,
             unclip_ratio: 1.5,
-            src_dimensions: [0, 0],
-            dst_dimensions: [0, 0],
-            padding: [0, 0, 0, 0],
         })
     }
 
@@ -129,7 +133,7 @@ impl DBNet {
     /// # Returns
     ///
     /// Preprocessed image ready for inference
-    pub fn preprocess(&mut self, image: &RgbImage) -> RgbImage {
+    pub(crate) fn preprocess(&self, image: &RgbImage) -> (RgbImage, DBNetPreprocessResult) {
         let width = image.width() as i32;
         let height = image.height() as i32;
         let orig_max_side = width.max(height);
@@ -147,7 +151,7 @@ impl DBNet {
             image,
             resized_width,
             resized_height,
-            image::imageops::FilterType::Lanczos3,
+            image::imageops::FilterType::Triangle,
         );
 
         let pad_width_total = (32 - (resized_width % 32)) % 32;
@@ -170,16 +174,18 @@ impl DBNet {
             None,
         );
 
-        self.src_dimensions = [width, height];
-        self.dst_dimensions = [final_width as i32, final_height as i32];
-        self.padding = [
-            pad_top as i32,
-            pad_bottom as i32,
-            pad_left as i32,
-            pad_right as i32,
-        ];
+        let meta = DBNetPreprocessResult {
+            src_dimensions: [width, height],
+            dst_dimensions: [final_width as i32, final_height as i32],
+            padding: [
+                pad_top as i32,
+                pad_bottom as i32,
+                pad_left as i32,
+                pad_right as i32,
+            ],
+        };
 
-        padded_final_img
+        (padded_final_img, meta)
     }
 
     /// Performs text detection on a preprocessed image.
@@ -206,7 +212,11 @@ impl DBNet {
     /// 6. Fit minimum area rectangles to contours
     /// 7. Filter boxes by size and confidence
     /// 8. Rescale to original image coordinates
-    pub fn detect(&mut self, image: &RgbImage) -> Result<Vec<TextBox>, InferenceError> {
+    pub(crate) fn detect(
+        &mut self,
+        image: &RgbImage,
+        meta: &DBNetPreprocessResult,
+    ) -> Result<Vec<TextBox>, InferenceError> {
         let input_array =
             image_utils::subtract_mean_normalize(image, &self.mean_values, &self.norm_values);
 
@@ -279,7 +289,7 @@ impl DBNet {
 
         let dilated_img = dilate(&threshold_img, Norm::LInf, 1);
 
-        let text_boxes = self.get_text_boxes(&dilated_img, &pred_array)?;
+        let text_boxes = self.get_text_boxes(&dilated_img, &pred_array, meta)?;
 
         Ok(text_boxes)
     }
@@ -302,6 +312,7 @@ impl DBNet {
         &self,
         threshold_img: &image::GrayImage,
         pred_array: &Array2<f32>,
+        meta: &DBNetPreprocessResult,
     ) -> Result<Vec<TextBox>, InferenceError> {
         const LONG_SIDE_THRESH: i32 = 3;
         const MAX_CANDIDATES: usize = 1000;
@@ -400,7 +411,8 @@ impl DBNet {
                 continue;
             }
 
-            let int_clip_min_boxes = self.rescale_box(
+            let int_clip_min_boxes = Self::rescale_box(
+                meta,
                 &clip_min_boxes,
                 pred_array.ncols() as i32,
                 pred_array.nrows() as i32,
@@ -434,7 +446,7 @@ impl DBNet {
     ///
     /// Four corner points in original image coordinates, clamped to valid bounds.
     fn rescale_box(
-        &self,
+        meta: &DBNetPreprocessResult,
         box_points: &[Coord<i32>; 4],
         pred_width: i32,
         pred_height: i32,
@@ -453,30 +465,30 @@ impl DBNet {
                 continue;
             }
 
-            let x_dst = x_f * (self.dst_dimensions[0] as f32 / w_out);
-            let y_dst = y_f * (self.dst_dimensions[1] as f32 / h_out);
+            let x_dst = x_f * (meta.dst_dimensions[0] as f32 / w_out);
+            let y_dst = y_f * (meta.dst_dimensions[1] as f32 / h_out);
 
             let w_scaled_content =
-                (self.dst_dimensions[0] - self.padding[2] - self.padding[3]) as f32;
+                (meta.dst_dimensions[0] - meta.padding[2] - meta.padding[3]) as f32;
             let h_scaled_content =
-                (self.dst_dimensions[1] - self.padding[0] - self.padding[1]) as f32;
+                (meta.dst_dimensions[1] - meta.padding[0] - meta.padding[1]) as f32;
 
-            let x_on_scaled_content = x_dst - self.padding[2] as f32;
-            let y_on_scaled_content = y_dst - self.padding[0] as f32;
+            let x_on_scaled_content = x_dst - meta.padding[2] as f32;
+            let y_on_scaled_content = y_dst - meta.padding[0] as f32;
 
             let mut x_orig = 0.0;
             let mut y_orig = 0.0;
 
             if w_scaled_content > 1e-6 {
-                x_orig = x_on_scaled_content * (self.src_dimensions[0] as f32 / w_scaled_content);
+                x_orig = x_on_scaled_content * (meta.src_dimensions[0] as f32 / w_scaled_content);
             }
 
             if h_scaled_content > 1e-6 {
-                y_orig = y_on_scaled_content * (self.src_dimensions[1] as f32 / h_scaled_content);
+                y_orig = y_on_scaled_content * (meta.src_dimensions[1] as f32 / h_scaled_content);
             }
 
-            let max_x_coord = (self.src_dimensions[0] - 1).max(0) as f32;
-            let max_y_coord = (self.src_dimensions[1] - 1).max(0) as f32;
+            let max_x_coord = (meta.src_dimensions[0] - 1).max(0) as f32;
+            let max_y_coord = (meta.src_dimensions[1] - 1).max(0) as f32;
 
             let pt_x = x_orig.clamp(0.0, max_x_coord) as i32;
             let pt_y = y_orig.clamp(0.0, max_y_coord) as i32;
@@ -577,13 +589,9 @@ impl DBNet {
     /// * `Err(InferenceError)` - If any step of the detection pipeline fails
     pub fn run(image: &RgbImage) -> Result<Vec<TextBox>, InferenceError> {
         let instance = Self::instance()?;
-        let mut model = instance
-            .lock()
-            .map_err(|e| InferenceError::ProcessingError {
-                message: format!("Failed to lock DBNet instance: {e}"),
-            })?;
+        let mut model = instance.lock();
 
-        let preprocessed = model.preprocess(image);
-        model.detect(&preprocessed)
+        let (preprocessed, meta) = model.preprocess(image);
+        model.detect(&preprocessed, &meta)
     }
 }

@@ -1,8 +1,8 @@
 //! Singleton pattern macros for inference models.
 //!
 //! This module provides macros to when implementing the singleton
-//! pattern for inference models. Models are wrapped in `Mutex` for thread-safe access
-//! and stored in `OnceLock` for lazy initialization.
+//! pattern for inference models. Models are wrapped in `parking_lot::Mutex` for thread-safe
+//! access and stored in `OnceLock` for lazy initialization.
 //!
 //! # Available Macros
 //!
@@ -28,7 +28,7 @@ macro_rules! impl_simple_singleton {
         instance: $instance:ident,
         init: $init:expr
     ) => {
-        static $instance: ::std::sync::OnceLock<::std::sync::Mutex<$model>> =
+        static $instance: ::std::sync::OnceLock<::parking_lot::Mutex<$model>> =
             ::std::sync::OnceLock::new();
 
         impl $model {
@@ -45,7 +45,7 @@ macro_rules! impl_simple_singleton {
                     return Ok(());
                 }
                 let init_fn: fn() -> Result<Self, $crate::inference::InferenceError> = $init;
-                let val = init_fn().map(::std::sync::Mutex::new)?;
+                let val = init_fn().map(::parking_lot::Mutex::new)?;
                 let _ = $instance.set(val);
                 Ok(())
             }
@@ -54,12 +54,13 @@ macro_rules! impl_simple_singleton {
             ///
             /// Initializes the instance if it hasn't been created yet.
             fn instance(
-            ) -> Result<&'static ::std::sync::Mutex<Self>, $crate::inference::InferenceError> {
+            ) -> Result<&'static ::parking_lot::Mutex<Self>, $crate::inference::InferenceError>
+            {
                 if let Some(val) = $instance.get() {
                     return Ok(val);
                 }
                 let init_fn: fn() -> Result<Self, $crate::inference::InferenceError> = $init;
-                let val = init_fn().map(::std::sync::Mutex::new)?;
+                let val = init_fn().map(::parking_lot::Mutex::new)?;
                 let _ = $instance.set(val);
                 $instance
                     .get()
@@ -92,7 +93,9 @@ macro_rules! impl_keyed_singleton {
         instance: $instance:ident
     ) => {
         static $instance: ::std::sync::OnceLock<
-            ::std::sync::RwLock<::std::collections::HashMap<$key_type, ::std::sync::Mutex<$model>>>,
+            ::parking_lot::RwLock<
+                ::std::collections::HashMap<$key_type, ::parking_lot::Mutex<$model>>,
+            >,
         > = ::std::sync::OnceLock::new();
 
         impl $model {
@@ -110,30 +113,22 @@ macro_rules! impl_keyed_singleton {
             /// Returns an [`InferenceError`] if model initialization fails.
             pub fn get_or_init(key: $key_type) -> Result<(), $crate::inference::InferenceError> {
                 let map = $instance
-                    .get_or_init(|| ::std::sync::RwLock::new(::std::collections::HashMap::new()));
+                    .get_or_init(|| ::parking_lot::RwLock::new(::std::collections::HashMap::new()));
 
                 {
-                    let read_guard = map.read().map_err(|e| {
-                        $crate::inference::InferenceError::ProcessingError {
-                            message: format!("Failed to acquire read lock: {e}"),
-                        }
-                    })?;
+                    let read_guard = map.read();
                     if read_guard.contains_key(&key) {
                         return Ok(());
                     }
                 }
 
-                let mut write_guard = map.write().map_err(|e| {
-                    $crate::inference::InferenceError::ProcessingError {
-                        message: format!("Failed to acquire write lock: {e}"),
-                    }
-                })?;
+                let mut write_guard = map.write();
 
                 if let ::std::collections::hash_map::Entry::Vacant(e) =
                     write_guard.entry(key.clone())
                 {
                     let model = Self::new(key)?;
-                    e.insert(::std::sync::Mutex::new(model));
+                    e.insert(::parking_lot::Mutex::new(model));
                 }
 
                 Ok(())
@@ -155,9 +150,7 @@ macro_rules! impl_keyed_singleton {
             ///
             /// # Errors
             ///
-            /// Returns an [`InferenceError`] if:
-            /// - Model initialization fails
-            /// - Lock acquisition fails
+            /// Returns an [`InferenceError`] if model initialization fails.
             pub fn with_instance<F, R>(
                 key: $key_type,
                 f: F,
@@ -173,11 +166,7 @@ macro_rules! impl_keyed_singleton {
                     }
                 })?;
 
-                let read_guard =
-                    map.read()
-                        .map_err(|e| $crate::inference::InferenceError::ProcessingError {
-                            message: format!("Failed to acquire read lock: {e}"),
-                        })?;
+                let read_guard = map.read();
 
                 let mutex = read_guard.get(&key).ok_or_else(|| {
                     $crate::inference::InferenceError::ProcessingError {
@@ -185,11 +174,7 @@ macro_rules! impl_keyed_singleton {
                     }
                 })?;
 
-                let mut model = mutex.lock().map_err(|e| {
-                    $crate::inference::InferenceError::ProcessingError {
-                        message: format!("Failed to lock model instance: {e}"),
-                    }
-                })?;
+                let mut model = mutex.lock();
 
                 f(&mut model)
             }
@@ -221,7 +206,7 @@ macro_rules! impl_static_keyed_singleton {
         }
     ) => {
         $(
-            static $instance: ::std::sync::OnceLock<::std::sync::Mutex<$model>> =
+            static $instance: ::std::sync::OnceLock<::parking_lot::Mutex<$model>> =
                 ::std::sync::OnceLock::new();
         )+
 
@@ -243,7 +228,7 @@ macro_rules! impl_static_keyed_singleton {
                     $(
                         <$key_type>::$variant => {
                             if $instance.get().is_none() {
-                                let val = Self::new(<$key_type>::$variant).map(::std::sync::Mutex::new)?;
+                                let val = Self::new(<$key_type>::$variant).map(::parking_lot::Mutex::new)?;
                                 let _ = $instance.set(val);
                             }
                         }
@@ -255,14 +240,14 @@ macro_rules! impl_static_keyed_singleton {
             /// Returns a reference to the singleton instance for the specified key.
             ///
             /// Initializes the instance if it hasn't been created yet.
-            fn instance(key: $key_type) -> Result<&'static ::std::sync::Mutex<Self>, $crate::inference::InferenceError> {
+            fn instance(key: $key_type) -> Result<&'static ::parking_lot::Mutex<Self>, $crate::inference::InferenceError> {
                 match key {
                     $(
                         <$key_type>::$variant => {
                             if let Some(val) = $instance.get() {
                                 return Ok(val);
                             }
-                            let val = Self::new(<$key_type>::$variant).map(::std::sync::Mutex::new)?;
+                            let val = Self::new(<$key_type>::$variant).map(::parking_lot::Mutex::new)?;
                             let _ = $instance.set(val);
                             $instance.get().ok_or_else(|| {
                                 $crate::inference::InferenceError::ProcessingError {

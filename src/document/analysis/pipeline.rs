@@ -24,39 +24,24 @@ use crate::inference::{
 use crate::utils::lang_utils::{Directionality, LangUtils};
 use crate::utils::{box_utils, image_utils};
 
-/// Result type for image document processing.
-///
-/// Contains the extracted information from processing an image-based document:
-/// - Text lines detected in the document
-/// - Individual words extracted from text recognition
-/// - Layout boxes identifying document regions
-/// - Tables detected and parsed from the document
-/// - Document orientation
-/// - Detected language
-type ImageProcessingResult = (
-    Vec<TextBox>,
-    Vec<TextBox>,
-    Vec<LayoutBox>,
-    Vec<Table>,
-    Orientation,
-    Language,
-);
+/// Result from processing an image-based document through the full OCR pipeline.
+struct ImageProcessingResult {
+    text_lines: Vec<TextBox>,
+    words: Vec<TextBox>,
+    layout_boxes: Vec<LayoutBox>,
+    tables: Vec<Table>,
+    orientation: Orientation,
+    language: Language,
+}
 
-/// Result type for PDF document processing with embedded text.
-///
-/// Contains the extracted information from processing a PDF with embedded text:
-/// - Text lines matched from embedded text data
-/// - Layout boxes identifying document regions
-/// - Tables detected and parsed from the document
-/// - Document orientation
-/// - Detected language
-type PdfProcessingResult = (
-    Vec<TextBox>,
-    Vec<LayoutBox>,
-    Vec<Table>,
-    Orientation,
-    Language,
-);
+/// Result from processing a PDF document with embedded text.
+struct PdfProcessingResult {
+    text_lines: Vec<TextBox>,
+    layout_boxes: Vec<LayoutBox>,
+    tables: Vec<Table>,
+    orientation: Orientation,
+    language: Language,
+}
 
 /// Processing mode that determines the depth of document analysis.
 ///
@@ -153,41 +138,14 @@ impl AnalysisPipeline {
                 if let Some(ref image) = page.image {
                     if page.has_embedded_text_data() {
                         debug!("Processing PDF with embedded text");
-                        let (text_lines, layout_boxes, tables, orientation, language) =
+                        let result =
                             self.process_pdf_with_embedded_text(image, page, language_cache)?;
-
-                        page.orientation = Some(orientation);
-                        page.detected_language =
-                            Some(LangUtils::map_from_lingua_language(language).into_owned());
-                        page.tables = tables;
-
-                        let regions =
-                            LayoutBox::build_regions(page.page_number, &layout_boxes, &text_lines);
-                        page.layout_boxes = layout_boxes;
-                        page.text_lines = text_lines;
-                        page.regions = regions;
-
-                        Self::update_page_text(page);
+                        Self::apply_pdf_result(page, result);
                     } else {
                         debug!("Processing PDF as image");
-                        let (text_lines, words, layout_boxes, tables, orientation, language) =
+                        let result =
                             self.process_image_document(image, page.page_number, language_cache)?;
-
-                        page.orientation = Some(orientation);
-                        page.detected_language =
-                            Some(LangUtils::map_from_lingua_language(language).into_owned());
-                        page.tables = tables;
-                        if !words.is_empty() {
-                            page.words = words;
-                        }
-
-                        let regions =
-                            LayoutBox::build_regions(page.page_number, &layout_boxes, &text_lines);
-                        page.layout_boxes = layout_boxes;
-                        page.text_lines = text_lines;
-                        page.regions = regions;
-
-                        Self::update_page_text(page);
+                        Self::apply_image_result(page, result);
                     }
                 }
 
@@ -199,24 +157,9 @@ impl AnalysisPipeline {
             DocumentType::Png | DocumentType::Jpeg | DocumentType::Tiff => {
                 debug!("Processing image document");
                 if let Some(ref image) = page.image {
-                    let (text_lines, words, layout_boxes, tables, orientation, language) =
+                    let result =
                         self.process_image_document(image, page.page_number, language_cache)?;
-
-                    page.orientation = Some(orientation);
-                    page.detected_language =
-                        Some(LangUtils::map_from_lingua_language(language).into_owned());
-                    page.tables = tables;
-                    if !words.is_empty() {
-                        page.words = words;
-                    }
-
-                    let regions =
-                        LayoutBox::build_regions(page.page_number, &layout_boxes, &text_lines);
-                    page.layout_boxes = layout_boxes;
-                    page.text_lines = text_lines;
-                    page.regions = regions;
-
-                    Self::update_page_text(page);
+                    Self::apply_image_result(page, result);
                 }
 
                 if self.process_mode != ProcessMode::Read {
@@ -243,16 +186,53 @@ impl AnalysisPipeline {
     ///
     /// * `page` - Mutable reference to the page content to update
     fn update_page_text(page: &mut PageContent) {
-        let texts: Vec<String> = page
-            .text_lines
-            .iter()
-            .filter_map(|text_line| text_line.text.as_ref())
-            .cloned()
-            .collect();
-
-        if !texts.is_empty() {
-            page.text = Some(texts.join("\n"));
+        let mut text = String::new();
+        for text_line in &page.text_lines {
+            if let Some(ref line_text) = text_line.text {
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                text.push_str(line_text);
+            }
         }
+        if !text.is_empty() {
+            page.text = Some(text);
+        }
+    }
+
+    /// Applies an [`ImageProcessingResult`] to a page.
+    fn apply_image_result(page: &mut PageContent, result: ImageProcessingResult) {
+        page.orientation = Some(result.orientation);
+        page.detected_language =
+            Some(LangUtils::map_from_lingua_language(result.language).into_owned());
+        page.tables = result.tables;
+        if !result.words.is_empty() {
+            page.words = result.words;
+        }
+
+        let regions =
+            LayoutBox::build_regions(page.page_number, &result.layout_boxes, &result.text_lines);
+        page.layout_boxes = result.layout_boxes;
+        page.text_lines = result.text_lines;
+        page.regions = regions;
+
+        Self::update_page_text(page);
+    }
+
+    /// Applies a [`PdfProcessingResult`] to a page.
+    fn apply_pdf_result(page: &mut PageContent, result: PdfProcessingResult) {
+        page.orientation = Some(result.orientation);
+        page.detected_language =
+            Some(LangUtils::map_from_lingua_language(result.language).into_owned());
+        page.tables = result.tables;
+
+        let regions =
+            LayoutBox::build_regions(page.page_number, &result.layout_boxes, &result.text_lines);
+        page.layout_boxes = result.layout_boxes;
+        page.text_lines = result.text_lines;
+        page.regions = regions;
+
+        Self::update_page_text(page);
     }
 
     /// Answers a list of questions based on the page's text content.
@@ -404,43 +384,41 @@ impl AnalysisPipeline {
     fn sort_text_elements_by_reading_order(
         text_elements: &mut [TextBox],
         directionality: Directionality,
-        images: Option<&mut Vec<RgbImage>>,
+        mut images: Option<&mut Vec<RgbImage>>,
     ) {
         if text_elements.is_empty() {
             return;
         }
 
         let bounds_list: Vec<_> = text_elements.iter().map(|t| t.bounds).collect();
-        let ordered_indices = box_utils::graph_based_reading_order(&bounds_list, directionality);
+        let perm = box_utils::graph_based_reading_order(&bounds_list, directionality);
 
-        let sorted: Vec<TextBox> = ordered_indices
-            .iter()
-            .filter_map(|&idx| {
-                let box_idx = idx.saturating_sub(1);
-                text_elements.get(box_idx).cloned()
-            })
-            .collect();
+        let mut inv = vec![0usize; perm.len()];
+        for (new_pos, &old_pos) in perm.iter().enumerate() {
+            inv[old_pos] = new_pos;
+        }
 
-        if let Some(imgs) = images {
-            if imgs.len() == text_elements.len() {
-                let sorted_imgs: Vec<RgbImage> = ordered_indices
-                    .iter()
-                    .filter_map(|&idx| {
-                        let box_idx = idx.saturating_sub(1);
-                        imgs.get(box_idx).cloned()
-                    })
-                    .collect();
-                for (i, img) in sorted_imgs.into_iter().enumerate() {
-                    imgs[i] = img;
+        let sync_images = images
+            .as_ref()
+            .is_some_and(|imgs| imgs.len() == text_elements.len());
+
+        for i in 0..inv.len() {
+            while inv[i] != i {
+                let target = inv[i];
+                text_elements.swap(i, target);
+                if sync_images {
+                    if let Some(ref mut imgs) = images {
+                        imgs.swap(i, target);
+                    }
                 }
+                inv.swap(i, target);
             }
         }
 
         let mut current_offset = 0;
-        for (i, sorted_item) in sorted.into_iter().enumerate() {
-            text_elements[i] = sorted_item;
-            let text_len = text_elements[i].text.as_ref().map(|t| t.len()).unwrap_or(0);
-            text_elements[i].span = Some(crate::document::text_box::DocumentSpan::new(
+        for elem in text_elements.iter_mut() {
+            let text_len = elem.text.as_ref().map(|t| t.len()).unwrap_or(0);
+            elem.span = Some(crate::document::text_box::DocumentSpan::new(
                 current_offset,
                 text_len,
             ));
@@ -736,13 +714,13 @@ impl AnalysisPipeline {
             table.match_words_to_cells(&page.words, 0.5);
         }
 
-        Ok((
+        Ok(PdfProcessingResult {
             text_lines,
             layout_boxes,
             tables,
-            document_orientation,
+            orientation: document_orientation,
             language,
-        ))
+        })
     }
 
     /// Matches embedded text words to detected text line regions.
@@ -763,20 +741,38 @@ impl AnalysisPipeline {
     /// - `text_score`: Average confidence of matched words
     /// - `angle`: Set to `Oriented0` if not already set
     fn match_embedded_text_to_lines(text_lines: &mut [TextBox], embedded_words: &[TextBox]) {
+        if embedded_words.is_empty() {
+            return;
+        }
+
+        let mut word_indices: Vec<usize> = (0..embedded_words.len()).collect();
+        word_indices.sort_by_key(|&i| embedded_words[i].bounds.top());
+
         for text_line in text_lines.iter_mut() {
+            let line_top = text_line.bounds.top();
+            let line_bottom = text_line.bounds.bottom();
+            let line_height = line_bottom - line_top;
+
             let mut matched_texts = Vec::new();
             let mut total_confidence = 0.0;
             let mut text_count = 0;
 
-            for embedded_word in embedded_words {
-                if box_utils::calculate_overlap(
-                    embedded_word.bounds.as_slice(),
-                    text_line.bounds.as_slice(),
-                ) > 0.75
+            let search_top = line_top - line_height;
+            let start =
+                word_indices.partition_point(|&i| embedded_words[i].bounds.top() < search_top);
+
+            for &wi in &word_indices[start..] {
+                let word = &embedded_words[wi];
+                if word.bounds.top() > line_bottom {
+                    break;
+                }
+
+                if box_utils::calculate_overlap(word.bounds.as_slice(), text_line.bounds.as_slice())
+                    > 0.75
                 {
-                    if let Some(ref text) = embedded_word.text {
+                    if let Some(ref text) = word.text {
                         matched_texts.push(text.clone());
-                        total_confidence += embedded_word.text_score;
+                        total_confidence += word.text_score;
                         text_count += 1;
                     }
                 }
@@ -910,14 +906,14 @@ impl AnalysisPipeline {
             table.match_words_to_cells(&words, 0.5);
         }
 
-        Ok((
+        Ok(ImageProcessingResult {
             text_lines,
             words,
             layout_boxes,
             tables,
-            document_orientation,
+            orientation: document_orientation,
             language,
-        ))
+        })
     }
 
     /// Analyzes an entire document, processing all pages.

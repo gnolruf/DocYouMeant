@@ -21,7 +21,7 @@ pub struct CsvContent {
 }
 
 impl DocumentContent for CsvContent {
-    fn get_pages(&self) -> &Vec<PageContent> {
+    fn get_pages(&self) -> &[PageContent] {
         &self.pages
     }
 

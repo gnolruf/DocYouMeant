@@ -67,7 +67,7 @@ impl Phi4MiniInference {
     /// * `Err(InferenceError)` - If model files are missing or cannot be loaded
     pub fn new() -> Result<Self, InferenceError> {
         let config = AppConfig::get();
-        let model_path_str = config.model_path("onnx");
+        let model_path_str = config.model_path("onnx")?;
         let model_dir = Path::new(&model_path_str);
 
         let use_cuda = ort::execution_providers::CUDAExecutionProvider::default()
@@ -107,7 +107,7 @@ impl Phi4MiniInference {
             })?;
 
         let config = AppConfig::get();
-        let tokenizer_path = config.model_path("tokenizer/phi-4-mini-instruct/tokenizer.json");
+        let tokenizer_path = config.model_path("tokenizer/phi-4-mini-instruct/tokenizer.json")?;
         let tokenizer = Tokenizer::from_file(&tokenizer_path).map_err(|e| {
             InferenceError::PreprocessingError {
                 operation: "load tokenizer for EOS token".to_string(),
@@ -182,7 +182,7 @@ impl Phi4MiniInference {
             return Ok(tokenizer);
         }
         let config = AppConfig::get();
-        let tokenizer_path = config.model_path("tokenizer/phi-4-mini-instruct/tokenizer.json");
+        let tokenizer_path = config.model_path("tokenizer/phi-4-mini-instruct/tokenizer.json")?;
         let tokenizer = Tokenizer::from_file(&tokenizer_path).map_err(|e| {
             InferenceError::PreprocessingError {
                 operation: "load tokenizer".to_string(),
@@ -220,11 +220,7 @@ impl Phi4MiniInference {
     {
         let instance = Self::instance()?;
 
-        let mut model = instance
-            .lock()
-            .map_err(|e| InferenceError::ProcessingError {
-                message: format!("Failed to lock Phi4MiniInference instance: {e}"),
-            })?;
+        let mut model = instance.lock();
 
         f(&mut model)
     }
@@ -312,48 +308,26 @@ impl Phi4MiniInference {
     ///
     /// Vector of 64 ONNX values representing empty KV caches.
     /// Shape per tensor: (1, 8, 0, 128) where 8 is the number of attention heads.
+    fn create_empty_kv_tensor(&self) -> Result<Value, InferenceError> {
+        let map_err = |e: ort::Error| InferenceError::PreprocessingError {
+            operation: "create empty kv tensor".to_string(),
+            message: e.to_string(),
+        };
+        if self.use_cuda {
+            let v = Value::from_array(Array4::from_elem((1, 8, 0, 128), f16::from_f32(0.0)))
+                .map_err(map_err)?;
+            Ok(v.into())
+        } else {
+            let v = Value::from_array(Array4::<f32>::zeros((1, 8, 0, 128))).map_err(map_err)?;
+            Ok(v.into())
+        }
+    }
+
     fn init_past_key_values(&self) -> Result<Vec<Value>, InferenceError> {
         let mut past_key_values: Vec<Value> = Vec::with_capacity(64);
         for _ in 0..32 {
-            if self.use_cuda {
-                let empty = Array4::from_elem((1, 8, 0, 128), f16::from_f32(0.0));
-                past_key_values.push(
-                    Value::from_array(empty)
-                        .map_err(|e| InferenceError::PreprocessingError {
-                            operation: "create empty kv tensor".to_string(),
-                            message: e.to_string(),
-                        })?
-                        .into(),
-                );
-                let empty = Array4::from_elem((1, 8, 0, 128), f16::from_f32(0.0));
-                past_key_values.push(
-                    Value::from_array(empty)
-                        .map_err(|e| InferenceError::PreprocessingError {
-                            operation: "create empty kv tensor".to_string(),
-                            message: e.to_string(),
-                        })?
-                        .into(),
-                );
-            } else {
-                let empty = Array4::<f32>::zeros((1, 8, 0, 128));
-                past_key_values.push(
-                    Value::from_array(empty)
-                        .map_err(|e| InferenceError::PreprocessingError {
-                            operation: "create empty kv tensor".to_string(),
-                            message: e.to_string(),
-                        })?
-                        .into(),
-                );
-                let empty = Array4::<f32>::zeros((1, 8, 0, 128));
-                past_key_values.push(
-                    Value::from_array(empty)
-                        .map_err(|e| InferenceError::PreprocessingError {
-                            operation: "create empty kv tensor".to_string(),
-                            message: e.to_string(),
-                        })?
-                        .into(),
-                );
-            }
+            past_key_values.push(self.create_empty_kv_tensor()?);
+            past_key_values.push(self.create_empty_kv_tensor()?);
         }
         Ok(past_key_values)
     }
@@ -421,52 +395,37 @@ impl Phi4MiniInference {
     /// * `Ok(i64)` - Token ID of the most likely next token
     /// * `Err(InferenceError)` - If logits extraction fails
     fn extract_next_token(&self, logits_value: Value) -> Result<i64, InferenceError> {
+        macro_rules! argmax_last_position {
+            ($typ:ty) => {{
+                let logits: ArrayView<$typ, _> = logits_value
+                    .try_extract_array::<$typ>()
+                    .map_err(|source| InferenceError::ModelExecutionError {
+                        operation: "extract logits".to_string(),
+                        source,
+                    })?
+                    .into_dimensionality::<Ix3>()
+                    .map_err(|e| InferenceError::PredictionError {
+                        operation: "reshape logits".to_string(),
+                        message: format!("Failed to reshape logits: {e}"),
+                    })?;
+
+                logits
+                    .slice(s![0, -1, ..VOCAB_SIZE])
+                    .iter()
+                    .enumerate()
+                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                    .ok_or_else(|| InferenceError::PredictionError {
+                        operation: "find max logit".to_string(),
+                        message: "Empty logits tensor".to_string(),
+                    })?
+                    .0 as i64
+            }};
+        }
+
         if self.use_cuda {
-            let logits: ArrayView<f16, _> = logits_value
-                .try_extract_array::<f16>()
-                .map_err(|source| InferenceError::ModelExecutionError {
-                    operation: "extract logits".to_string(),
-                    source,
-                })?
-                .into_dimensionality::<Ix3>()
-                .map_err(|e| InferenceError::PredictionError {
-                    operation: "reshape logits".to_string(),
-                    message: format!("Failed to reshape logits: {e}"),
-                })?;
-
-            let (token_idx, _) = logits
-                .slice(s![0, -1, ..VOCAB_SIZE])
-                .iter()
-                .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                .ok_or_else(|| InferenceError::PredictionError {
-                    operation: "find max logit".to_string(),
-                    message: "Empty logits tensor".to_string(),
-                })?;
-            Ok(token_idx as i64)
+            Ok(argmax_last_position!(f16))
         } else {
-            let logits: ArrayView<f32, _> = logits_value
-                .try_extract_array::<f32>()
-                .map_err(|source| InferenceError::ModelExecutionError {
-                    operation: "extract logits".to_string(),
-                    source,
-                })?
-                .into_dimensionality::<Ix3>()
-                .map_err(|e| InferenceError::PredictionError {
-                    operation: "reshape logits".to_string(),
-                    message: format!("Failed to reshape logits: {e}"),
-                })?;
-
-            let (token_idx, _) = logits
-                .slice(s![0, -1, ..VOCAB_SIZE])
-                .iter()
-                .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                .ok_or_else(|| InferenceError::PredictionError {
-                    operation: "find max logit".to_string(),
-                    message: "Empty logits tensor".to_string(),
-                })?;
-            Ok(token_idx as i64)
+            Ok(argmax_last_position!(f32))
         }
     }
 

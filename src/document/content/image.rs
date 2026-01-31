@@ -20,7 +20,7 @@ pub struct ImageContent {
 }
 
 impl DocumentContent for ImageContent {
-    fn get_pages(&self) -> &Vec<PageContent> {
+    fn get_pages(&self) -> &[PageContent] {
         &self.pages
     }
 

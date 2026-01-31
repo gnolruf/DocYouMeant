@@ -17,7 +17,7 @@ use crate::utils::config::AppConfig;
 /// path traversal attacks and filesystem issues:
 /// - `/` - Directory separator, could allow path traversal
 /// - `\0` - Null byte, can cause string truncation issues
-const FORBIDDEN_FILENAME_CHARS: &[char] = &['/', '\0'];
+const FORBIDDEN_FILENAME_CHARS: &[char] = &['/', '\\', '\0'];
 
 /// Request payload for document analysis.
 ///
@@ -142,6 +142,10 @@ impl AnalysisRequest {
             if FORBIDDEN_FILENAME_CHARS.contains(&ch) {
                 return Err(ValidationError::ForbiddenCharacter(ch));
             }
+        }
+
+        if filename.contains("..") {
+            return Err(ValidationError::PathTraversal);
         }
 
         if !filename.contains('.') || filename.ends_with('.') {

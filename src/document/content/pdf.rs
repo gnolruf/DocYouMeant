@@ -31,7 +31,7 @@ pub struct PdfContent {
 }
 
 impl DocumentContent for PdfContent {
-    fn get_pages(&self) -> &Vec<PageContent> {
+    fn get_pages(&self) -> &[PageContent] {
         &self.pages
     }
 

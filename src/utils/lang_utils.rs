@@ -3,11 +3,20 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
+use std::sync::OnceLock;
 
 use lingua::{Language, LanguageDetector, LanguageDetectorBuilder};
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 use super::config::AppConfig;
+
+/// Cached language configurations (all models).
+static LANG_CONFIGS_ALL: OnceLock<HashMap<String, LanguageModelInfo>> = OnceLock::new();
+/// Cached language configurations (script models only).
+static LANG_CONFIGS_SCRIPT: OnceLock<HashMap<String, LanguageModelInfo>> = OnceLock::new();
+/// Cached language detector instance.
+static LANGUAGE_DETECTOR: OnceLock<Mutex<LanguageDetector>> = OnceLock::new();
 
 /// Text directionality for a language.
 ///
@@ -82,10 +91,12 @@ impl LangUtils {
             Ok(configs) => configs.get(language_str.as_ref()).cloned(),
             Err(_) => {
                 if language == Language::English {
+                    let model_file = config.model_path("onnx/text_recognition_en.onnx").ok()?;
+                    let dict_file = config.model_path("dict/en_dict.txt").ok()?;
                     Some(LanguageModelInfo {
                         name: "english".to_string(),
-                        model_file: config.model_path("onnx/text_recognition_en.onnx"),
-                        dict_file: config.model_path("dict/en_dict.txt"),
+                        model_file,
+                        dict_file,
                         is_script_model: false,
                         directionality: Directionality::Ltr,
                     })
@@ -157,27 +168,43 @@ impl LangUtils {
     pub fn get_all_language_configs(
         script_models_only: bool,
     ) -> Result<HashMap<String, LanguageModelInfo>, Box<dyn std::error::Error>> {
+        let cache = if script_models_only {
+            &LANG_CONFIGS_SCRIPT
+        } else {
+            &LANG_CONFIGS_ALL
+        };
+
+        if let Some(cached) = cache.get() {
+            return Ok(cached.clone());
+        }
+
         let config = AppConfig::get();
-        let config_path = config.model_path("ocr_lang_models.json");
+        let config_path = config.model_path("ocr_lang_models.json")?;
+        let model_set_prefix = format!("{}/{}", config.model_directory, config.model_set()?);
         let config_content = fs::read_to_string(config_path)?;
-        let configs: HashMap<String, LanguageModelInfo> =
+        let all_configs: HashMap<String, LanguageModelInfo> =
             serde_json::from_str::<HashMap<String, LanguageModelInfo>>(&config_content)?
                 .into_iter()
                 .map(|(name, mut info)| {
-                    info.model_file = config.model_path(&info.model_file);
+                    info.model_file = format!("{}/{}", model_set_prefix, info.model_file);
                     info.dict_file = config.shared_path(&info.dict_file);
                     (name, info)
                 })
                 .collect();
 
-        if script_models_only {
-            Ok(configs
-                .into_iter()
-                .filter(|(_, config)| config.is_script_model)
-                .collect())
-        } else {
-            Ok(configs)
-        }
+        let script_configs: HashMap<String, LanguageModelInfo> = all_configs
+            .iter()
+            .filter(|(_, c)| c.is_script_model)
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+
+        let _ = LANG_CONFIGS_ALL.set(all_configs);
+        let _ = LANG_CONFIGS_SCRIPT.set(script_configs);
+
+        cache
+            .get()
+            .cloned()
+            .ok_or_else(|| "Failed to cache language configs".into())
     }
 
     /// Builds a mapping of OCR model files to their supported languages.
@@ -267,14 +294,22 @@ impl LangUtils {
                 .and_then(|l| Self::map_to_lingua_language(l));
         }
 
-        let detector: LanguageDetector = LanguageDetectorBuilder::from_languages(&lingua_languages)
-            .with_preloaded_language_models()
-            .build();
+        let detector_mutex = LANGUAGE_DETECTOR.get_or_init(|| {
+            let all_languages: Vec<Language> = Language::all().into_iter().collect();
+            Mutex::new(
+                LanguageDetectorBuilder::from_languages(&all_languages)
+                    .with_preloaded_language_models()
+                    .build(),
+            )
+        });
 
+        let detector = detector_mutex.lock();
         let combined_text = texts.join(" ");
 
-        detector
-            .detect_language_of(&combined_text)
+        let detected = detector.detect_language_of(&combined_text);
+
+        detected
+            .filter(|lang| lingua_languages.contains(lang))
             .or_else(|| lingua_languages.first().copied())
     }
 

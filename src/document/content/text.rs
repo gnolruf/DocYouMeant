@@ -17,7 +17,7 @@ pub struct TextContent {
 }
 
 impl DocumentContent for TextContent {
-    fn get_pages(&self) -> &Vec<PageContent> {
+    fn get_pages(&self) -> &[PageContent] {
         &self.pages
     }
 

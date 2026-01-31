@@ -47,6 +47,21 @@ pub enum RtDetrResult {
     TableCells(Vec<TableCell>),
 }
 
+/// Preprocessing metadata produced by [`RtDetr::preprocess`].
+///
+/// Contains the dimensional information needed to rescale detected boxes
+/// back to original image coordinates.
+pub(crate) struct RtDetrPreprocessResult {
+    /// Original input image width
+    src_width: i32,
+    /// Original input image height
+    src_height: i32,
+    /// Horizontal scaling factor from input to model dimensions
+    scale_x: f32,
+    /// Vertical scaling factor from input to model dimensions
+    scale_y: f32,
+}
+
 /// RT-DETR object detection model for document analysis.
 ///
 /// `RtDetr` provides real-time object detection using a transformer-based
@@ -58,23 +73,17 @@ pub enum RtDetrResult {
 /// - `session`: ONNX Runtime session for model inference
 /// - `mean_values`: ImageNet mean values for normalization [R, G, B]
 /// - `norm_values`: Normalization divisors for each channel
-/// - `src_width`, `src_height`: Original input image dimensions
 /// - `input_size`: Model input dimension (800 for layout, 640 for table cells)
 /// - `conf_threshold`: Minimum confidence score to keep a detection (0.5)
 /// - `nms_threshold`: IoU threshold for non-maximum suppression (0.4)
-/// - `scale_x`, `scale_y`: Scaling factors from input to model dimensions
 /// - `mode`: Current operating mode determining detection behavior
 pub struct RtDetr {
     session: Session,
     mean_values: [f32; 3],
     norm_values: [f32; 3],
-    src_width: i32,
-    src_height: i32,
     input_size: u32,
     conf_threshold: f32,
     nms_threshold: f32,
-    scale_x: f32,
-    scale_y: f32,
     mode: RtDetrMode,
 }
 
@@ -120,7 +129,7 @@ impl RtDetr {
             RtDetrMode::WiredTableCell => Self::WIRED_TABLE_CELL_DETECTION_MODEL_PATH,
             RtDetrMode::WirelessTableCell => Self::WIRELESS_TABLE_CELL_DETECTION_MODEL_PATH,
         };
-        let model_path = config.model_path(relative_path);
+        let model_path = config.model_path(relative_path)?;
 
         let session = Session::builder()
             .map_err(|source| InferenceError::ModelFileLoadError {
@@ -131,7 +140,7 @@ impl RtDetr {
                 ort::execution_providers::TensorRTExecutionProvider::default()
                     .with_device_id(0)
                     .with_engine_cache(true)
-                    .with_engine_cache_path(config.rt_cache_directory())
+                    .with_engine_cache_path(config.rt_cache_directory()?)
                     .with_engine_cache_prefix("docyoumeant_")
                     .with_max_workspace_size(5 << 30)
                     .with_fp16(true)
@@ -158,13 +167,9 @@ impl RtDetr {
                 1.0 / 0.224 / 255.0,
                 1.0 / 0.225 / 255.0,
             ],
-            src_height: 0,
-            src_width: 0,
             input_size,
             conf_threshold: 0.5,
             nms_threshold: 0.4,
-            scale_x: 1.0,
-            scale_y: 1.0,
             mode,
         })
     }
@@ -181,21 +186,28 @@ impl RtDetr {
     /// # Returns
     ///
     /// Resized image ready for inference
-    pub fn preprocess(&mut self, image: &RgbImage) -> RgbImage {
-        self.src_width = image.width() as i32;
-        self.src_height = image.height() as i32;
+    pub(crate) fn preprocess(&self, image: &RgbImage) -> (RgbImage, RtDetrPreprocessResult) {
+        let src_width = image.width() as i32;
+        let src_height = image.height() as i32;
 
         let resized_img = image::imageops::resize(
             image,
             self.input_size,
             self.input_size,
-            image::imageops::FilterType::Lanczos3,
+            image::imageops::FilterType::Triangle,
         );
 
-        self.scale_x = self.input_size as f32 / self.src_width as f32;
-        self.scale_y = self.input_size as f32 / self.src_height as f32;
+        let scale_x = self.input_size as f32 / src_width as f32;
+        let scale_y = self.input_size as f32 / src_height as f32;
 
-        resized_img
+        let meta = RtDetrPreprocessResult {
+            src_width,
+            src_height,
+            scale_x,
+            scale_y,
+        };
+
+        (resized_img, meta)
     }
 
     /// Creates the input tensors required by the RT-DETR model.
@@ -215,6 +227,7 @@ impl RtDetr {
     fn create_model_inputs(
         &self,
         image: &RgbImage,
+        meta: &RtDetrPreprocessResult,
     ) -> Result<(Value, Value, Value), InferenceError> {
         let input_array =
             image_utils::subtract_mean_normalize(image, &self.mean_values, &self.norm_values);
@@ -228,7 +241,7 @@ impl RtDetr {
             }
         })?;
 
-        let im_shape_data = vec![self.src_height as f32, self.src_width as f32];
+        let im_shape_data = vec![meta.src_height as f32, meta.src_width as f32];
         let im_shape_array = Array2::from_shape_vec((1, 2), im_shape_data).map_err(|e| {
             InferenceError::PreprocessingError {
                 operation: "create im_shape array".to_string(),
@@ -243,9 +256,7 @@ impl RtDetr {
                 message: e.to_string(),
             })?;
 
-        let scale_y = self.input_size as f32 / self.src_height as f32;
-        let scale_x = self.input_size as f32 / self.src_width as f32;
-        let scale_factor_data = vec![scale_y, scale_x];
+        let scale_factor_data = vec![meta.scale_y, meta.scale_x];
         let scale_factor_array =
             Array2::from_shape_vec((1, 2), scale_factor_data).map_err(|e| {
                 InferenceError::PreprocessingError {
@@ -284,8 +295,13 @@ impl RtDetr {
     ///
     /// * `Ok(RtDetrResult)` - Detection results (LayoutBoxes or TableCells)
     /// * `Err(InferenceError)` - If detection fails
-    fn detect(&mut self, image: &RgbImage) -> Result<RtDetrResult, InferenceError> {
-        let (image_input, im_shape_input, scale_factor_input) = self.create_model_inputs(image)?;
+    fn detect(
+        &mut self,
+        image: &RgbImage,
+        meta: &RtDetrPreprocessResult,
+    ) -> Result<RtDetrResult, InferenceError> {
+        let (image_input, im_shape_input, scale_factor_input) =
+            self.create_model_inputs(image, meta)?;
 
         let (bbox_data, num_detections) = {
             let outputs = self
@@ -354,10 +370,10 @@ impl RtDetr {
             };
 
             if is_valid_class {
-                let orig_x1 = (x1 * self.scale_x).round() as i32;
-                let orig_y1 = (y1 * self.scale_y).round() as i32;
-                let orig_x2 = (x2 * self.scale_x).round() as i32;
-                let orig_y2 = (y2 * self.scale_y).round() as i32;
+                let orig_x1 = (x1 * meta.scale_x).round() as i32;
+                let orig_y1 = (y1 * meta.scale_y).round() as i32;
+                let orig_x2 = (x2 * meta.scale_x).round() as i32;
+                let orig_y2 = (y2 * meta.scale_y).round() as i32;
 
                 if orig_x2 > orig_x1 && orig_y2 > orig_y1 {
                     let points = [
@@ -427,13 +443,9 @@ impl RtDetr {
     /// * `Err(InferenceError)` - If any step fails
     pub fn run(image: &RgbImage, mode: RtDetrMode) -> Result<RtDetrResult, InferenceError> {
         let instance = Self::instance(mode)?;
-        let mut model = instance
-            .lock()
-            .map_err(|e| InferenceError::ProcessingError {
-                message: format!("Failed to lock RtDetr instance: {e}"),
-            })?;
+        let mut model = instance.lock();
 
-        let preprocessed = model.preprocess(image);
-        model.detect(&preprocessed)
+        let (preprocessed, meta) = model.preprocess(image);
+        model.detect(&preprocessed, &meta)
     }
 }

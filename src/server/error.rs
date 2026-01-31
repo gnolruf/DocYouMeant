@@ -32,6 +32,9 @@ pub enum ValidationError {
 
     #[error("Filename cannot start with a period or space, or end with a space")]
     InvalidFilenameEdges,
+
+    #[error("Filename contains path traversal sequence")]
+    PathTraversal,
 }
 
 #[derive(Error, Debug)]
@@ -44,6 +47,9 @@ pub enum AppError {
         #[from]
         source: DocumentError,
     },
+
+    #[error("Internal server error: {message}")]
+    Internal { message: String },
 }
 
 impl IntoResponse for AppError {
@@ -58,6 +64,11 @@ impl IntoResponse for AppError {
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "Document Processing Error".to_string(),
                 Some(source.to_string()),
+            ),
+            AppError::Internal { message } => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal Server Error".to_string(),
+                Some(message),
             ),
         };
 

@@ -3,8 +3,16 @@ use std::path::PathBuf;
 use ort::Error as OrtError;
 use thiserror::Error;
 
+use crate::utils::error::ConfigError;
+
 #[derive(Error, Debug)]
 pub enum InferenceError {
+    #[error("Configuration error: {source}")]
+    Config {
+        #[from]
+        source: ConfigError,
+    },
+
     #[error("ONNX Runtime error: {source}")]
     Ort {
         #[from]

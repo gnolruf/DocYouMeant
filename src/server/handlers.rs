@@ -74,23 +74,31 @@ pub async fn analyze_document(
     let document_bytes = request.validate_and_decode()?;
     let filename = request.sanitized_filename();
 
-    let mut document = Document::new(&document_bytes, &filename)?;
-
-    tracing::info!("Document loaded with type: {:?}", document.doc_type());
-
-    let questions = request.questions.as_deref();
-
     let language = request
         .language
         .as_deref()
         .and_then(LangUtils::parse_language)
         .or(state.default_language);
 
-    document.analyze(questions, &request.process_id, language)?;
+    let process_id = request.process_id.clone();
+    let questions = request.questions.clone();
 
-    tracing::info!("Document analysis completed successfully");
+    let result = tokio::task::spawn_blocking(move || {
+        let mut document = Document::new(&document_bytes, &filename)?;
 
-    let result = document.to_analyze_result()?;
+        tracing::info!("Document loaded with type: {:?}", document.doc_type());
+
+        let questions = questions.as_deref();
+        document.analyze(questions, &process_id, language)?;
+
+        tracing::info!("Document analysis completed successfully");
+
+        document.to_analyze_result()
+    })
+    .await
+    .map_err(|e| AppError::Internal {
+        message: format!("Task join error: {e}"),
+    })??;
 
     Ok(Json(AnalyzeResponse::success(result)))
 }

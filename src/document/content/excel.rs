@@ -46,7 +46,7 @@ pub struct ExcelContent {
 }
 
 impl DocumentContent for ExcelContent {
-    fn get_pages(&self) -> &Vec<PageContent> {
+    fn get_pages(&self) -> &[PageContent] {
         &self.pages
     }
 

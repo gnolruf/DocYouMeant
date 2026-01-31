@@ -373,7 +373,7 @@ pub trait DocumentContent: std::fmt::Debug + Any {
     ///
     /// Each [`PageContent`] contains the extracted content and analysis
     /// results for one page of the document.
-    fn get_pages(&self) -> &Vec<PageContent>;
+    fn get_pages(&self) -> &[PageContent];
 
     /// Returns a mutable reference to the document's pages.
     ///

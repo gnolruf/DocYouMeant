@@ -119,14 +119,13 @@ impl AppConfig {
 
     /// Get the active model set name.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if called before `init()` or if no model set was configured.
-    #[must_use]
-    pub fn model_set(&self) -> &str {
+    /// Returns [`ConfigError::MissingModelSet`] if no model set was configured.
+    pub fn model_set(&self) -> Result<&str, ConfigError> {
         self.model_set
-            .as_ref()
-            .expect("model_set not initialized - call init() first")
+            .as_deref()
+            .ok_or(ConfigError::MissingModelSet)
     }
 
     /// Get the path to a model file within the active model set directory.
@@ -137,15 +136,18 @@ impl AppConfig {
     ///
     /// # Returns
     ///
-    /// Returns the full path to a model file
-    #[must_use]
-    pub fn model_path(&self, relative_path: &str) -> String {
-        format!(
+    /// Returns the full path to a model file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `model_set` is not configured.
+    pub fn model_path(&self, relative_path: &str) -> Result<String, ConfigError> {
+        Ok(format!(
             "{}/{}/{}",
             self.model_directory,
-            self.model_set(),
+            self.model_set()?,
             relative_path
-        )
+        ))
     }
 
     /// Get the path to a shared file in the model directory (not model-set specific).
@@ -169,9 +171,16 @@ impl AppConfig {
     /// # Returns
     ///
     /// Returns the path: `{model_directory}/{model_set}/trt_engines`
-    #[must_use]
-    pub fn rt_cache_directory(&self) -> String {
-        format!("{}/{}/trt_engines", self.model_directory, self.model_set())
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `model_set` is not configured.
+    pub fn rt_cache_directory(&self) -> Result<String, ConfigError> {
+        Ok(format!(
+            "{}/{}/trt_engines",
+            self.model_directory,
+            self.model_set()?
+        ))
     }
 }
 
@@ -245,6 +254,23 @@ mod tests {
 
         assert_eq!(config.max_file_size, 52428800);
         assert_eq!(config.model_set, None);
+        assert!(config.model_set().is_err());
+        assert!(config.model_path("test").is_err());
+        assert!(config.rt_cache_directory().is_err());
+    }
+
+    #[test]
+    fn test_model_set_returns_value() {
+        let config = AppConfig::default();
+        assert_eq!(config.model_set().unwrap(), "edge");
+        assert_eq!(
+            config.model_path("test.onnx").unwrap(),
+            "models/edge/test.onnx"
+        );
+        assert_eq!(
+            config.rt_cache_directory().unwrap(),
+            "models/edge/trt_engines"
+        );
     }
 
     #[test]

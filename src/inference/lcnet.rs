@@ -115,7 +115,7 @@ impl LCNet {
             LCNetMode::DocumentOrientation => Self::DOCUMENT_ORIENTATION_MODEL_PATH,
             LCNetMode::TableType => Self::TABLE_CLASSIFICATION_MODEL_PATH,
         };
-        let model_path = config.model_path(relative_path);
+        let model_path = config.model_path(relative_path)?;
 
         let session = Session::builder()
             .map_err(|source| InferenceError::ModelFileLoadError {
@@ -126,7 +126,7 @@ impl LCNet {
                 ort::execution_providers::TensorRTExecutionProvider::default()
                     .with_device_id(0)
                     .with_engine_cache(true)
-                    .with_engine_cache_path(config.rt_cache_directory())
+                    .with_engine_cache_path(config.rt_cache_directory()?)
                     .with_engine_cache_prefix("docyoumeant_")
                     .with_max_workspace_size(5 << 30)
                     .with_fp16(true)
@@ -381,11 +381,7 @@ impl LCNet {
         most_angle: bool,
     ) -> Result<Vec<Orientation>, InferenceError> {
         let instance = Self::instance(mode)?;
-        let mut model = instance
-            .lock()
-            .map_err(|e| InferenceError::ProcessingError {
-                message: format!("Failed to lock LCNet instance: {e}"),
-            })?;
+        let mut model = instance.lock();
         let size = part_imgs.len();
         let mut angles = Vec::with_capacity(size);
 
@@ -450,11 +446,7 @@ impl LCNet {
     /// * `Err(InferenceError)` - If classification fails
     fn get_table_types(table_imgs: &[RgbImage]) -> Result<Vec<TableType>, InferenceError> {
         let instance = Self::instance(LCNetMode::TableType)?;
-        let mut model = instance
-            .lock()
-            .map_err(|e| InferenceError::ProcessingError {
-                message: format!("Failed to lock LCNet instance: {e}"),
-            })?;
+        let mut model = instance.lock();
         let size = table_imgs.len();
         let mut table_types = Vec::with_capacity(size);
 

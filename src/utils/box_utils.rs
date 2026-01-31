@@ -32,15 +32,15 @@ use geo_clipper::Clipper;
 pub fn calculate_iou(points1: &[Coord<i32>], points2: &[Coord<i32>]) -> f32 {
     let poly1 = Polygon::new(
         LineString::from_iter(points1.iter().map(|c| Coord {
-            x: c.x as f32,
-            y: c.y as f32,
+            x: c.x as f64,
+            y: c.y as f64,
         })),
         vec![],
     );
     let poly2 = Polygon::new(
         LineString::from_iter(points2.iter().map(|c| Coord {
-            x: c.x as f32,
-            y: c.y as f32,
+            x: c.x as f64,
+            y: c.y as f64,
         })),
         vec![],
     );
@@ -58,7 +58,7 @@ pub fn calculate_iou(points1: &[Coord<i32>], points2: &[Coord<i32>]) -> f32 {
     let union = area1 + area2 - intersection_area;
 
     if union > 0.0 {
-        intersection_area / union
+        (intersection_area / union) as f32
     } else {
         0.0
     }
@@ -350,15 +350,29 @@ pub fn graph_based_reading_order(
     let mut graph: Vec<Vec<usize>> = vec![Vec::with_capacity(n / 4); n];
     let mut in_degree: Vec<usize> = vec![0; n];
 
-    for i in 0..n {
-        for j in 0..n {
-            if i == j {
-                continue;
+    let mut sorted_indices: Vec<usize> = (0..n).collect();
+    sorted_indices.sort_by_key(|&i| bounds_list[i].center_y());
+
+    let max_height = bounds_list.iter().map(|b| b.height()).max().unwrap_or(0);
+
+    for si in 0..n {
+        let i = sorted_indices[si];
+        for &j in &sorted_indices[(si + 1)..] {
+            let vertical_sep = bounds_list[j].center_y() - bounds_list[i].center_y();
+
+            if vertical_sep > max_height {
+                graph[i].push(j);
+                in_degree[j] += 1;
+                break;
             }
 
             if should_come_before(&bounds_list[i], &bounds_list[j], directionality) {
                 graph[i].push(j);
                 in_degree[j] += 1;
+            }
+            if should_come_before(&bounds_list[j], &bounds_list[i], directionality) {
+                graph[j].push(i);
+                in_degree[i] += 1;
             }
         }
     }
@@ -416,7 +430,7 @@ pub fn graph_based_reading_order(
         result.extend(remaining);
     }
 
-    result.into_iter().map(|i| i + 1).collect()
+    result
 }
 
 /// Determines if one box should be read before another based on spatial position.
@@ -975,7 +989,7 @@ mod tests {
             Coord { x: 0, y: 10 },
         ])];
         let result = graph_based_reading_order(&boxes, Directionality::Ltr);
-        assert_eq!(result, vec![1]);
+        assert_eq!(result, vec![0]);
     }
 
     #[test]
@@ -1001,7 +1015,7 @@ mod tests {
             ]),
         ];
         let result = graph_based_reading_order(&boxes, Directionality::Ltr);
-        assert_eq!(result, vec![2, 3, 1]);
+        assert_eq!(result, vec![1, 2, 0]);
     }
 
     #[test]
@@ -1027,7 +1041,7 @@ mod tests {
             ]),
         ];
         let result = graph_based_reading_order(&boxes, Directionality::Ltr);
-        assert_eq!(result, vec![3, 1, 2]);
+        assert_eq!(result, vec![2, 0, 1]);
     }
 
     #[test]
@@ -1094,6 +1108,6 @@ mod tests {
         ];
         let bounds: Vec<_> = text_boxes.iter().map(|t| t.bounds).collect();
         let result = graph_based_reading_order(&bounds, Directionality::Ltr);
-        assert_eq!(result, vec![2, 1]);
+        assert_eq!(result, vec![1, 0]);
     }
 }
