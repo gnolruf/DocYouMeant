@@ -24,8 +24,14 @@ models/ocr_lang_models.json
 # Environment files
 .env
 
+# Generated cargo config (machine-specific paths from setup_deps)
+.cargo/config.toml
+
 # Python virtual environment
 .venv/
+
+# Downloaded native dependencies
+deps/
 
 # Generated visualizations and test outputs
 layout_result.png
