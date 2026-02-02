@@ -103,6 +103,18 @@ impl DBNet {
                 path: model_path.clone().into(),
                 source,
             })?
+            .with_execution_providers([ort::ep::TensorRT::default()
+                .with_device_id(0)
+                .with_engine_cache(true)
+                .with_engine_cache_path(config.rt_cache_directory()?)
+                .with_engine_cache_prefix("docyoumeant_")
+                .with_max_workspace_size(5 << 30)
+                .with_fp16(true)
+                .with_timing_cache(true)
+                .with_profile_min_shapes("x:1x3x32x32")
+                .with_profile_max_shapes("x:1x3x960x960")
+                .with_profile_opt_shapes("x:1x3x640x640")
+                .build()])?
             .with_inter_threads(Self::NUM_THREADS)?
             .with_prepacked_weights(prepacked)?
             .commit_from_file(&model_path)

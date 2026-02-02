@@ -8,7 +8,7 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
-use image::{imageops, Rgb, RgbImage};
+use image::{imageops, RgbImage};
 use lingua::Language;
 use ort::{inputs, session::builder::PrepackedWeights, session::Session, value::Value};
 use std::sync::OnceLock;
@@ -102,11 +102,24 @@ impl Crnn {
             }
         })?;
 
+        let app_config = crate::utils::config::AppConfig::get();
         let session = Session::builder()
             .map_err(|source| InferenceError::ModelFileLoadError {
                 path: config.model_file.clone().into(),
                 source,
             })?
+            .with_execution_providers([ort::ep::TensorRT::default()
+                .with_device_id(0)
+                .with_engine_cache(true)
+                .with_engine_cache_path(app_config.rt_cache_directory()?)
+                .with_engine_cache_prefix("docyoumeant_")
+                .with_max_workspace_size(5 << 30)
+                .with_fp16(true)
+                .with_timing_cache(true)
+                .with_profile_min_shapes("x:1x3x48x32")
+                .with_profile_max_shapes("x:1x3x48x1280")
+                .with_profile_opt_shapes("x:1x3x48x320")
+                .build()])?
             .with_inter_threads(Self::NUM_THREADS)?
             .with_prepacked_weights(prepacked)?
             .commit_from_file(&config.model_file)
@@ -214,107 +227,70 @@ impl Crnn {
             return Ok(Vec::new());
         }
 
-        let batch_size = part_imgs.len().min(text_boxes.len());
-        if batch_size == 0 {
+        let count = part_imgs.len().min(text_boxes.len());
+        if count == 0 {
             return Ok(Vec::new());
         }
-
-        let resized_images: Vec<RgbImage> = part_imgs
-            .iter()
-            .take(batch_size)
-            .map(|img| {
-                let scale = self.dst_height as f32 / img.height() as f32;
-                let dst_width = (img.width() as f32 * scale) as u32;
-                imageops::resize(
-                    img,
-                    dst_width,
-                    self.dst_height,
-                    imageops::FilterType::Lanczos3,
-                )
-            })
-            .collect();
-
-        let original_widths: Vec<u32> = resized_images.iter().map(|img| img.width()).collect();
-        let max_width = original_widths.iter().copied().max().unwrap_or(1);
-
-        let normalized_arrays: Vec<_> = resized_images
-            .iter()
-            .map(|img| {
-                let padding_amount = max_width.saturating_sub(img.width());
-                let (padding_left, padding_right) = match directionality {
-                    Directionality::Ltr => (0, padding_amount),
-                    Directionality::Rtl => (padding_amount, 0),
-                };
-                let padded = image_utils::add_image_padding(
-                    img,
-                    0,
-                    0,
-                    padding_left,
-                    padding_right,
-                    Some(Rgb([127, 127, 127])),
-                );
-                image_utils::subtract_mean_normalize(&padded, &self.mean_values, &self.norm_values)
-            })
-            .collect();
-
-        let batch_array = image_utils::stack_arrays(&normalized_arrays).map_err(|e| {
-            InferenceError::PreprocessingError {
-                operation: "stack arrays".to_string(),
-                message: e.to_string(),
-            }
-        })?;
-
-        let shape = batch_array.shape().to_vec();
-        let (data, _offset) = batch_array.into_raw_vec_and_offset();
-        let input_value = Value::from_array((shape.as_slice(), data)).map_err(|e| {
-            InferenceError::PreprocessingError {
-                operation: "create batched input value".to_string(),
-                message: e.to_string(),
-            }
-        })?;
-
-        let (output_data, output_shape) = {
-            let outputs = self
-                .session
-                .run(inputs!["x" => input_value])
-                .map_err(|source| InferenceError::ModelExecutionError {
-                    operation: "CrnnNet batched forward pass".to_string(),
-                    source,
-                })?;
-
-            let output_tensor = outputs
-                .get("fetch_name_0")
-                .ok_or_else(|| InferenceError::PredictionError {
-                    operation: "get model outputs".to_string(),
-                    message: "Output 'fetch_name_0' not found".to_string(),
-                })?
-                .try_extract_tensor::<f32>()
-                .map_err(|source| InferenceError::PredictionError {
-                    operation: "extract output tensor".to_string(),
-                    message: source.to_string(),
-                })?;
-
-            (output_tensor.1.to_vec(), output_tensor.0.clone())
-        };
-
-        let seq_len = output_shape[1] as usize;
-        let vocab_size = output_shape[2] as usize;
-        let output_batch_size = output_shape[0] as usize;
 
         let mut all_words = Vec::new();
         let mut current_offset = 0;
 
-        for i in 0..output_batch_size.min(batch_size) {
-            let item_start = i * seq_len * vocab_size;
-            let item_end = (i + 1) * seq_len * vocab_size;
-            let item_output = &output_data[item_start..item_end];
+        for i in 0..count {
+            let img = &part_imgs[i];
+            let scale = self.dst_height as f32 / img.height() as f32;
+            let dst_width = (img.width() as f32 * scale) as u32;
+            let resized = imageops::resize(
+                img,
+                dst_width,
+                self.dst_height,
+                imageops::FilterType::Lanczos3,
+            );
 
-            let width_ratio = original_widths[i] as f32 / max_width as f32;
-            let effective_seq_len = ((seq_len as f32) * width_ratio).ceil() as usize;
+            let input_array = image_utils::subtract_mean_normalize(
+                &resized,
+                &self.mean_values,
+                &self.norm_values,
+            );
+
+            let shape = input_array.shape().to_vec();
+            let (data, _offset) = input_array.into_raw_vec_and_offset();
+            let input_value = Value::from_array((shape.as_slice(), data)).map_err(|e| {
+                InferenceError::PreprocessingError {
+                    operation: "create input value".to_string(),
+                    message: e.to_string(),
+                }
+            })?;
+
+            let (output_data, output_shape) = {
+                let outputs = self
+                    .session
+                    .run(inputs!["x" => input_value])
+                    .map_err(|source| InferenceError::ModelExecutionError {
+                        operation: "CrnnNet forward pass".to_string(),
+                        source,
+                    })?;
+
+                let output_tensor = outputs
+                    .get("fetch_name_0")
+                    .ok_or_else(|| InferenceError::PredictionError {
+                        operation: "get model outputs".to_string(),
+                        message: "Output 'fetch_name_0' not found".to_string(),
+                    })?
+                    .try_extract_tensor::<f32>()
+                    .map_err(|source| InferenceError::PredictionError {
+                        operation: "extract output tensor".to_string(),
+                        message: source.to_string(),
+                    })?;
+
+                (output_tensor.1.to_vec(), output_tensor.0.clone())
+            };
+
+            let seq_len = output_shape[1] as usize;
+            let vocab_size = output_shape[2] as usize;
 
             let (text, score, words, new_offset) = self.score_to_text(
-                item_output,
-                effective_seq_len,
+                &output_data,
+                seq_len,
                 vocab_size,
                 &text_boxes[i],
                 current_offset,
